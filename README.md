@@ -1,0 +1,169 @@
+# Jira Data Center MCP Server
+
+A production-ready [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that connects an on-premises **Jira Data Center** instance to MCP-compatible clients such as GitHub Copilot Agent mode, Claude Desktop, or any other MCP host.
+
+Built with TypeScript, the official `@modelcontextprotocol/sdk`, Axios, and Zod.
+
+## Features
+
+- 🔐 **Pluggable authentication**: Personal Access Token (preferred) or Basic auth (username/password), selected automatically from environment variables via an `AuthProvider` abstraction.
+- 🧰 **12 MCP tools** covering issue search, retrieval, creation, comments, workflow transitions, and project listing.
+- 🧠 **`create_jira_story_from_requirements`**: turns raw workshop notes / Fit-Gap analysis text into structured Jira Stories, Tasks, and Bugs — ideal for going straight from meeting notes to a Jira backlog.
+- ✅ Zod-validated tool inputs, typed Jira REST responses, and normalized error handling.
+- 📝 Leveled logging to `stderr` (safe for the stdio MCP transport).
+
+## Project Structure
+
+```
+/src
+  server.ts                          # Entry point: wires config, auth, client, tools, and stdio transport
+  jira-client.ts                     # Axios-based Jira REST API v2 client + error normalization
+  auth.ts                            # AuthProvider abstraction (PAT / Basic)
+  config.ts                          # Env var loading & validation (Zod)
+  logger.ts                          # Leveled stderr logger
+  types.ts                           # Jira REST API response shapes
+  tools/
+    tool-helpers.ts                  # Shared CallToolResult helpers
+    get-current-user.ts
+    server-info.ts
+    search-issues.ts
+    get-issue.ts
+    create-issue.ts
+    add-comment.ts
+    transition-issue.ts
+    get-projects.ts
+    get-transitions.ts               # bonus
+    get-issue-comments.ts            # bonus
+    execute-jql.ts                   # bonus
+    create-story-from-requirements.ts# bonus: notes -> Jira backlog
+    requirements-parser.ts           # heuristic notes parser used above
+    index.ts                        # registers all tools
+```
+
+## Prerequisites
+
+- Node.js >= 18
+- A Jira Data Center instance reachable from this machine, with either:
+  - a **Personal Access Token** (Jira DC 8.14+, `Profile > Personal Access Tokens`), or
+  - a valid **username + password**
+
+## Setup
+
+```bash
+npm install
+cp .env.example .env   # then edit .env with your Jira URL + credentials
+npm run build
+npm start
+```
+
+For local iteration without a build step:
+
+```bash
+npm run dev
+```
+
+## Environment Variables
+
+| Variable                        | Required            | Description                                                   |
+| -------------------------------- | -------------------- | -------------------------------------------------------------- |
+| `JIRA_BASE_URL`                  | Yes                  | Base URL of your Jira Data Center instance, e.g. `https://jira.company.com` |
+| `JIRA_PAT`                       | One of PAT/Basic     | Personal Access Token (preferred auth method)                 |
+| `JIRA_USERNAME`                  | One of PAT/Basic     | Username for Basic auth (requires `JIRA_PASSWORD`)             |
+| `JIRA_PASSWORD`                  | One of PAT/Basic     | Password for Basic auth (requires `JIRA_USERNAME`)              |
+| `JIRA_TIMEOUT_MS`                | No (default `15000`) | HTTP request timeout in milliseconds                            |
+| `JIRA_TLS_REJECT_UNAUTHORIZED`   | No (default `true`)  | Set to `false` only for internal CAs without a valid chain      |
+| `LOG_LEVEL`                      | No (default `info`)  | `debug` \| `info` \| `warn` \| `error`                          |
+
+If `JIRA_PAT` is set it takes precedence; otherwise both `JIRA_USERNAME` and `JIRA_PASSWORD` must be set. The server refuses to start if neither is configured.
+
+## MCP Tools
+
+| Tool | REST Call | Description |
+| --- | --- | --- |
+| `get_current_user` | `GET /rest/api/2/myself` | username, displayName, email, groups |
+| `server_info` | `GET /rest/api/2/serverInfo` | Jira version, deployment type, build number |
+| `search_issues` | `GET /rest/api/2/search` | Runs JQL, returns key/summary/status/assignee/reporter/created/updated |
+| `get_issue` | `GET /rest/api/2/issue/{key}` | Full issue details incl. comments, labels, assignee |
+| `create_issue` | `POST /rest/api/2/issue` | Creates an issue, returns its key |
+| `add_comment` | `POST /rest/api/2/issue/{key}/comment` | Adds a comment |
+| `transition_issue` | `POST /rest/api/2/issue/{key}/transitions` | Moves an issue through its workflow |
+| `get_projects` | `GET /rest/api/2/project` | Lists visible projects |
+| `get_transitions` *(bonus)* | `GET /rest/api/2/issue/{key}/transitions` | Lists valid transitions for an issue |
+| `get_issue_comments` *(bonus)* | `GET /rest/api/2/issue/{key}/comment` | Lists all comments on an issue |
+| `execute_jql` *(bonus)* | `GET /rest/api/2/search` | Arbitrary JQL with a configurable field set |
+| `create_jira_story_from_requirements` *(bonus)* | `POST /rest/api/2/issue` (looped) | Parses workshop notes / Fit-Gap text into Stories/Tasks/Bugs and bulk-creates them |
+
+### `create_jira_story_from_requirements` details
+
+Two ways to use it:
+
+1. **Automatic parsing** — pass raw `notes` text. The built-in heuristic parser detects:
+   - Explicit tags: lines starting with `Story:`, `Task:`, or `Bug:`
+   - User-story phrasing: `As a <role>, I want <goal> so that <benefit>` → Story
+   - Bullet / numbered list lines → Task
+   - Falls back to a single Task if nothing else matches, so non-empty notes always produce at least one item.
+2. **Pre-structured input** — pass an `items` array (`{ type, summary, description?, acceptanceCriteria? }`) when the calling agent has already analyzed the notes itself. `items` always takes precedence over `notes`.
+
+Set `dryRun: true` to preview the parsed/would-create items without touching Jira — recommended before bulk-creating from a large set of notes.
+
+Issue creation is done per-item with `Promise.allSettled`, so partial failures (e.g. one bad issue type) don't block the rest; the response reports `created` and `failed` separately.
+
+## VS Code MCP Configuration
+
+Add to your VS Code MCP configuration (e.g. `.vscode/mcp.json` in a workspace, or the user-level MCP settings):
+
+```json
+{
+  "servers": {
+    "jira-datacenter": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/dist/server.js"],
+      "env": {
+        "JIRA_BASE_URL": "https://jira.company.com",
+        "JIRA_PAT": "${input:jiraPat}"
+      }
+    }
+  },
+  "inputs": [
+    {
+      "id": "jiraPat",
+      "type": "promptString",
+      "description": "Jira Personal Access Token",
+      "password": true
+    }
+  ]
+}
+```
+
+Alternatively, point `command` at your global install (`jira-mcp-server`) if you `npm link` or `npm install -g` this package, or simply rely on a `.env` file next to `dist/server.js` and omit `env` entirely.
+
+## Example Prompts
+
+Once connected in Copilot Agent mode:
+
+- *"Use server_info to confirm we're talking to the right Jira instance, then get_current_user to confirm my identity."*
+- *"Search for all open bugs in project ABC assigned to me using search_issues."*
+- *"Get the full details of ABC-123, including its comments."*
+- *"Create a Task in project ABC titled 'Configure SSO for staging' with a short description."*
+- *"Add a comment to ABC-123 saying the fix has been deployed to staging."*
+- *"Show me the available transitions for ABC-123, then transition it to Done."*
+- *"List all projects I have access to."*
+- *"Run this JQL and show me just the priority and fixVersions fields: project = ABC AND status = 'In Progress'."*
+- *"Here are my Fit/Gap workshop notes: [paste notes]. Preview the Jira Stories/Tasks/Bugs you'd create in project ABC with dryRun, then create them for real."*
+
+## Error Handling
+
+All Jira REST errors (4xx/5xx, network failures) are caught in `jira-client.ts`, mapped to a `JiraApiError` carrying the HTTP status code and Jira's own `errorMessages`/`errors` payload, and surfaced to the MCP client as a tool error result (`isError: true`) with a human-readable message — never a raw stack trace.
+
+## Security Notes
+
+- Credentials are only ever read from environment variables — never hardcoded or logged.
+- Prefer a Personal Access Token over Basic auth; PATs can be scoped and revoked independently of your account password.
+- Set `JIRA_TLS_REJECT_UNAUTHORIZED=false` only as a last resort for internal CAs; prefer installing your corporate CA certificate via `NODE_EXTRA_CA_CERTS` instead.
+- This server only implements the **stdio** MCP transport (no HTTP listener), so it is not network-exposed by itself.
+- Run `npm audit` periodically — the MCP SDK's optional HTTP transport dependencies (`hono`, `ajv`/`fast-uri`) are not exercised by this server (stdio-only) but should still be kept current when upstream patches become available.
+
+## License
+
+MIT

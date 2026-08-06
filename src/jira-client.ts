@@ -1,0 +1,203 @@
+import axios, { AxiosInstance, AxiosError, isAxiosError } from "axios";
+import https from "node:https";
+import type { AuthProvider } from "./auth.js";
+import type { AppConfig } from "./config.js";
+import { logger } from "./logger.js";
+import type {
+  JiraUser,
+  JiraServerInfo,
+  JiraIssue,
+  JiraSearchResult,
+  JiraTransitionsResult,
+  JiraProject,
+  JiraComment,
+  JiraErrorResponse,
+} from "./types.js";
+
+/**
+ * Error raised for any non-2xx response (or network failure) from the Jira
+ * REST API. Carries the HTTP status code and Jira's own error details (when
+ * available) so callers/tools can surface actionable messages instead of a
+ * raw stack trace.
+ */
+export class JiraApiError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode?: number,
+    public readonly jiraErrors?: JiraErrorResponse,
+  ) {
+    super(message);
+    this.name = "JiraApiError";
+  }
+}
+
+function extractJiraErrorMessage(error: AxiosError<JiraErrorResponse>): string {
+  const data = error.response?.data;
+  const parts: string[] = [];
+  if (data?.errorMessages?.length) {
+    parts.push(...data.errorMessages);
+  }
+  if (data?.errors) {
+    for (const [field, msg] of Object.entries(data.errors)) {
+      parts.push(`${field}: ${msg}`);
+    }
+  }
+  if (parts.length > 0) {
+    return parts.join("; ");
+  }
+  return error.message;
+}
+
+export interface CreateIssueInput {
+  projectKey: string;
+  issueType: string;
+  summary: string;
+  description?: string;
+}
+
+export interface SearchIssuesInput {
+  jql: string;
+  maxResults?: number;
+  fields?: string[];
+}
+
+/**
+ * Thin, typed wrapper around the Jira Data Center REST API (v2) used by all
+ * MCP tools. Centralizes auth header injection, timeouts, and error
+ * normalization so individual tools stay simple.
+ */
+export class JiraClient {
+  private readonly http: AxiosInstance;
+
+  constructor(config: AppConfig, authProvider: AuthProvider) {
+    this.http = axios.create({
+      baseURL: `${config.JIRA_BASE_URL}/rest/api/2`,
+      timeout: config.JIRA_TIMEOUT_MS,
+      headers: {
+        Authorization: authProvider.getAuthHeader(),
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      httpsAgent: new https.Agent({
+        rejectUnauthorized: config.JIRA_TLS_REJECT_UNAUTHORIZED,
+      }),
+      // Never let axios throw on the default "reasonable" range only; we
+      // handle all non-2xx explicitly below for consistent error shaping.
+      validateStatus: (status) => status >= 200 && status < 300,
+    });
+
+    this.http.interceptors.request.use((req) => {
+      logger.debug(`-> ${req.method?.toUpperCase()} ${req.url}`);
+      return req;
+    });
+  }
+
+  private async request<T>(fn: () => Promise<{ data: T }>): Promise<T> {
+    try {
+      const { data } = await fn();
+      return data;
+    } catch (err) {
+      if (isAxiosError(err)) {
+        const axiosErr = err as AxiosError<JiraErrorResponse>;
+        const message = extractJiraErrorMessage(axiosErr);
+        logger.error(`Jira API error: ${message}`, {
+          status: axiosErr.response?.status,
+          url: axiosErr.config?.url,
+        });
+        throw new JiraApiError(
+          message,
+          axiosErr.response?.status,
+          axiosErr.response?.data,
+        );
+      }
+      throw err;
+    }
+  }
+
+  async getMyself(): Promise<JiraUser> {
+    return this.request(() =>
+      this.http.get<JiraUser>("/myself", {
+        params: { expand: "groups" },
+      }),
+    );
+  }
+
+  async getServerInfo(): Promise<JiraServerInfo> {
+    return this.request(() => this.http.get<JiraServerInfo>("/serverInfo"));
+  }
+
+  async searchIssues(input: SearchIssuesInput): Promise<JiraSearchResult> {
+    const fields =
+      input.fields ??
+      ["summary", "status", "assignee", "reporter", "created", "updated"];
+    return this.request(() =>
+      this.http.get<JiraSearchResult>("/search", {
+        params: {
+          jql: input.jql,
+          maxResults: input.maxResults ?? 50,
+          fields: fields.join(","),
+        },
+      }),
+    );
+  }
+
+  async getIssue(issueKey: string): Promise<JiraIssue> {
+    return this.request(() =>
+      this.http.get<JiraIssue>(`/issue/${encodeURIComponent(issueKey)}`, {
+        params: {
+          fields: "summary,description,status,comment,labels,assignee,reporter,created,updated,issuetype,project",
+        },
+      }),
+    );
+  }
+
+  async createIssue(input: CreateIssueInput): Promise<JiraIssue> {
+    return this.request(() =>
+      this.http.post<JiraIssue>("/issue", {
+        fields: {
+          project: { key: input.projectKey },
+          issuetype: { name: input.issueType },
+          summary: input.summary,
+          ...(input.description ? { description: input.description } : {}),
+        },
+      }),
+    );
+  }
+
+  async addComment(issueKey: string, comment: string): Promise<JiraComment> {
+    return this.request(() =>
+      this.http.post<JiraComment>(
+        `/issue/${encodeURIComponent(issueKey)}/comment`,
+        { body: comment },
+      ),
+    );
+  }
+
+  async getTransitions(issueKey: string): Promise<JiraTransitionsResult> {
+    return this.request(() =>
+      this.http.get<JiraTransitionsResult>(
+        `/issue/${encodeURIComponent(issueKey)}/transitions`,
+      ),
+    );
+  }
+
+  async transitionIssue(issueKey: string, transitionId: string): Promise<void> {
+    await this.request(() =>
+      this.http.post<void>(`/issue/${encodeURIComponent(issueKey)}/transitions`, {
+        transition: { id: transitionId },
+      }),
+    );
+  }
+
+  async getIssueComments(issueKey: string): Promise<{ comments: JiraComment[]; total: number }> {
+    return this.request(() =>
+      this.http.get<{ comments: JiraComment[]; total: number }>(
+        `/issue/${encodeURIComponent(issueKey)}/comment`,
+      ),
+    );
+  }
+
+  async getProjects(): Promise<JiraProject[]> {
+    return this.request(() => this.http.get<JiraProject[]>("/project"));
+  }
+}
