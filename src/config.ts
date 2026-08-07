@@ -3,9 +3,14 @@ import { z } from "zod";
 /**
  * Environment configuration schema.
  *
- * Authentication is either:
+ * Jira authentication is either:
  *  - JIRA_PAT (Personal Access Token, preferred), or
  *  - JIRA_USERNAME + JIRA_PASSWORD (Basic auth)
+ *
+ * Confluence (Data Center / Server) support is OPTIONAL and only enabled when
+ * CONFLUENCE_BASE_URL is set. Confluence-specific credentials are optional; if
+ * omitted, the Jira credentials are reused (common when Jira and Confluence
+ * share the same SSO / user directory).
  */
 const envSchema = z
   .object({
@@ -21,6 +26,16 @@ const envSchema = z
       .enum(["true", "false"])
       .default("true")
       .transform((v) => v === "true"),
+
+    // --- Confluence Data Center / Server (optional) ---
+    CONFLUENCE_BASE_URL: z
+      .string()
+      .url("CONFLUENCE_BASE_URL must be a valid URL, e.g. https://confluence.company.com")
+      .optional(),
+    CONFLUENCE_PAT: z.string().min(1).optional(),
+    CONFLUENCE_USERNAME: z.string().min(1).optional(),
+    CONFLUENCE_PASSWORD: z.string().min(1).optional(),
+
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   })
   .superRefine((data, ctx) => {
@@ -48,6 +63,20 @@ const envSchema = z
         message: "JIRA_PASSWORD is set but JIRA_USERNAME is missing.",
       });
     }
+
+    if (data.CONFLUENCE_USERNAME && !data.CONFLUENCE_PASSWORD) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "CONFLUENCE_USERNAME is set but CONFLUENCE_PASSWORD is missing.",
+      });
+    }
+
+    if (!data.CONFLUENCE_USERNAME && data.CONFLUENCE_PASSWORD) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "CONFLUENCE_PASSWORD is set but CONFLUENCE_USERNAME is missing.",
+      });
+    }
   });
 
 export type AppConfig = z.infer<typeof envSchema>;
@@ -60,7 +89,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       .join("\n");
     throw new Error(`Invalid Jira MCP server configuration:\n${details}`);
   }
-  // Normalize base URL (strip trailing slash) so path joins are predictable.
+  // Normalize base URLs (strip trailing slash) so path joins are predictable.
   parsed.data.JIRA_BASE_URL = parsed.data.JIRA_BASE_URL.replace(/\/+$/, "");
+  if (parsed.data.CONFLUENCE_BASE_URL) {
+    parsed.data.CONFLUENCE_BASE_URL = parsed.data.CONFLUENCE_BASE_URL.replace(/\/+$/, "");
+  }
   return parsed.data;
+}
+
+/**
+ * Confluence tools are only registered when a Confluence base URL is
+ * configured. This lets the server run in Jira-only mode unchanged.
+ */
+export function isConfluenceEnabled(config: AppConfig): boolean {
+  return !!config.CONFLUENCE_BASE_URL;
 }

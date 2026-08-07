@@ -91,3 +91,25 @@ export interface JiraErrorResponse {
   errorMessages?: string[];
   errors?: Record<string, string>;
 }
+
+/**
+ * A "remote link" on an issue — used by the Jira/Confluence integration to
+ * attach linked Confluence pages ("Wiki Page" links), plus generic web links.
+ * GET /rest/api/2/issue/{key}/remotelink returns an array of these.
+ */
+export interface JiraRemoteLink {
+  id?: number;
+  self?: string;
+  globalId?: string;
+  relationship?: string;
+  application?: {
+    type?: string;
+    name?: string;
+  };
+  object?: {
+    url?: string;
+    title?: string;
+    summary?: string;
+    icon?: { url16x16?: string; title?: string };
+  };
+}

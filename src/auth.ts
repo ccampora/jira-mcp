@@ -61,3 +61,24 @@ export function createAuthProvider(config: AppConfig): AuthProvider {
     "No authentication configured. Set JIRA_PAT, or both JIRA_USERNAME and JIRA_PASSWORD.",
   );
 }
+
+/**
+ * Builds the AuthProvider for Confluence Data Center. Confluence-specific
+ * credentials take precedence; if none are provided, the Jira credentials are
+ * reused (common when Jira and Confluence share the same SSO / user store).
+ */
+export function createConfluenceAuthProvider(config: AppConfig): AuthProvider {
+  const pat = config.CONFLUENCE_PAT ?? config.JIRA_PAT;
+  const username = config.CONFLUENCE_USERNAME ?? config.JIRA_USERNAME;
+  const password = config.CONFLUENCE_PASSWORD ?? config.JIRA_PASSWORD;
+
+  if (pat) {
+    return new PatAuthProvider(pat);
+  }
+  if (username && password) {
+    return new BasicAuthProvider(username, password);
+  }
+  throw new Error(
+    "No Confluence authentication configured. Set CONFLUENCE_PAT (or CONFLUENCE_USERNAME + CONFLUENCE_PASSWORD), or configure Jira credentials to be reused.",
+  );
+}

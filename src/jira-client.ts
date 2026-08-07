@@ -11,6 +11,7 @@ import type {
   JiraTransitionsResult,
   JiraProject,
   JiraComment,
+  JiraRemoteLink,
   JiraErrorResponse,
 } from "./types.js";
 
@@ -199,5 +200,13 @@ export class JiraClient {
 
   async getProjects(): Promise<JiraProject[]> {
     return this.request(() => this.http.get<JiraProject[]>("/project"));
+  }
+
+  async getIssueRemoteLinks(issueKey: string): Promise<JiraRemoteLink[]> {
+    return this.request(() =>
+      this.http.get<JiraRemoteLink[]>(
+        `/issue/${encodeURIComponent(issueKey)}/remotelink`,
+      ),
+    );
   }
 }
