@@ -87,6 +87,13 @@ export interface JiraProject {
   lead?: JiraUser;
 }
 
+export interface JiraIssueLinkType {
+  id: string;
+  name: string;
+  inward: string;
+  outward: string;
+}
+
 export interface JiraErrorResponse {
   errorMessages?: string[];
   errors?: Record<string, string>;

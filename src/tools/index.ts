@@ -13,6 +13,8 @@ import { registerGetProjectsTool } from "./get-projects.js";
 import { registerGetTransitionsTool } from "./get-transitions.js";
 import { registerGetIssueCommentsTool } from "./get-issue-comments.js";
 import { registerGetIssueRemoteLinksTool } from "./get-issue-remote-links.js";
+import { registerGetIssueLinkTypesTool } from "./get-issue-link-types.js";
+import { registerCreateIssueLinkTool } from "./create-issue-link.js";
 import { registerExecuteJqlTool } from "./execute-jql.js";
 import { registerCreateJiraStoryFromRequirementsTool } from "./create-story-from-requirements.js";
 import { registerConfluenceTools } from "./confluence/index.js";
@@ -40,6 +42,8 @@ export function registerAllTools(
   registerGetTransitionsTool(server, client);
   registerGetIssueCommentsTool(server, client);
   registerGetIssueRemoteLinksTool(server, client);
+  registerGetIssueLinkTypesTool(server, client);
+  registerCreateIssueLinkTool(server, client);
   registerExecuteJqlTool(server, client);
   registerCreateJiraStoryFromRequirementsTool(server, client);
 

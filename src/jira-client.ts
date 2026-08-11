@@ -11,6 +11,7 @@ import type {
   JiraTransitionsResult,
   JiraProject,
   JiraComment,
+  JiraIssueLinkType,
   JiraRemoteLink,
   JiraErrorResponse,
 } from "./types.js";
@@ -60,6 +61,13 @@ export interface SearchIssuesInput {
   jql: string;
   maxResults?: number;
   fields?: string[];
+}
+
+export interface LinkIssuesInput {
+  linkType: string;
+  inwardIssueKey: string;
+  outwardIssueKey: string;
+  comment?: string;
 }
 
 /**
@@ -200,6 +208,24 @@ export class JiraClient {
 
   async getProjects(): Promise<JiraProject[]> {
     return this.request(() => this.http.get<JiraProject[]>("/project"));
+  }
+
+  async getIssueLinkTypes(): Promise<JiraIssueLinkType[]> {
+    const response = await this.request(() =>
+      this.http.get<{ issueLinkTypes: JiraIssueLinkType[] }>("/issueLinkType"),
+    );
+    return response.issueLinkTypes;
+  }
+
+  async linkIssues(input: LinkIssuesInput): Promise<void> {
+    await this.request(() =>
+      this.http.post<void>("/issueLink", {
+        type: { name: input.linkType },
+        inwardIssue: { key: input.inwardIssueKey },
+        outwardIssue: { key: input.outwardIssueKey },
+        ...(input.comment ? { comment: { body: input.comment } } : {}),
+      }),
+    );
   }
 
   async getIssueRemoteLinks(issueKey: string): Promise<JiraRemoteLink[]> {
