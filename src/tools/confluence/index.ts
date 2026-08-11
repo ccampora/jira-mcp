@@ -7,6 +7,8 @@ import { registerConfluenceGetPageByTitleTool } from "./get-page-by-title.js";
 import { registerConfluenceSearchTool } from "./search.js";
 import { registerConfluenceGetSpacesTool } from "./get-spaces.js";
 import { registerConfluenceGetPageCommentsTool } from "./get-page-comments.js";
+import { registerConfluenceCreatePageTool } from "./create-page.js";
+import { registerConfluenceUpdatePageTool } from "./update-page.js";
 
 /**
  * Registers every Confluence MCP tool. Only called when Confluence support is
@@ -22,4 +24,6 @@ export function registerConfluenceTools(
   registerConfluenceGetPageTool(server, client);
   registerConfluenceGetPageByTitleTool(server, client);
   registerConfluenceGetPageCommentsTool(server, client);
+  registerConfluenceCreatePageTool(server, client);
+  registerConfluenceUpdatePageTool(server, client);
 }

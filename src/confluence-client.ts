@@ -65,6 +65,21 @@ export interface GetPageByTitleInput {
   expand?: string[];
 }
 
+export interface CreatePageInput {
+  spaceKey: string;
+  title: string;
+  bodyStorage: string;
+  parentId?: string;
+}
+
+export interface UpdatePageInput {
+  pageId: string;
+  title: string;
+  bodyStorage: string;
+  versionNumber: number;
+  versionMessage?: string;
+}
+
 /**
  * Thin, typed wrapper around the Confluence Data Center / Server REST API
  * (`/rest/api`) used by the Confluence MCP tools. Mirrors JiraClient:
@@ -145,6 +160,45 @@ export class ConfluenceClient {
           expand: expand.join(","),
         },
       }),
+    );
+  }
+
+  async createPage(input: CreatePageInput): Promise<ConfluenceContent> {
+    return this.request(() =>
+      this.http.post<ConfluenceContent>("/content", {
+        type: "page",
+        title: input.title,
+        space: { key: input.spaceKey },
+        ...(input.parentId ? { ancestors: [{ id: input.parentId }] } : {}),
+        body: {
+          storage: {
+            value: input.bodyStorage,
+            representation: "storage",
+          },
+        },
+      }),
+    );
+  }
+
+  async updatePage(input: UpdatePageInput): Promise<ConfluenceContent> {
+    return this.request(() =>
+      this.http.put<ConfluenceContent>(
+        `/content/${encodeURIComponent(input.pageId)}`,
+        {
+          type: "page",
+          title: input.title,
+          version: {
+            number: input.versionNumber,
+            ...(input.versionMessage ? { message: input.versionMessage } : {}),
+          },
+          body: {
+            storage: {
+              value: input.bodyStorage,
+              representation: "storage",
+            },
+          },
+        },
+      ),
     );
   }
 
