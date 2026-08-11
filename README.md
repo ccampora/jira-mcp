@@ -7,8 +7,8 @@ Built with TypeScript, the official `@modelcontextprotocol/sdk`, Axios, and Zod.
 ## Features
 
 - 🔐 **Pluggable authentication**: Personal Access Token (preferred) or Basic auth (username/password), selected automatically from environment variables via an `AuthProvider` abstraction.
-- 🧰 **13 Jira MCP tools** covering issue search, retrieval, creation, comments, workflow transitions, project listing, and remote links (linked Confluence pages).
-- 📚 **Optional Confluence Data Center / Server support**: when `CONFLUENCE_BASE_URL` is set, 6 additional read tools (spaces, CQL search, page retrieval, comments) are registered. Confluence reuses the Jira credentials unless Confluence-specific ones are provided.
+- 🧰 **15 Jira MCP tools** covering issue search, retrieval, creation, comments, workflow transitions, project listing, issue linking, and remote links (linked Confluence pages).
+- 📚 **Optional Confluence Data Center / Server support**: when `CONFLUENCE_BASE_URL` is set, 8 additional tools for spaces, CQL search, page retrieval, comments, and page creation/update are registered. Confluence reuses the Jira credentials unless Confluence-specific ones are provided.
 - 🧠 **`create_jira_story_from_requirements`**: turns raw workshop notes / Fit-Gap analysis text into structured Jira Stories, Tasks, and Bugs — ideal for going straight from meeting notes to a Jira backlog.
 - ✅ Zod-validated tool inputs, typed Jira REST responses, and normalized error handling.
 - 📝 Leveled logging to `stderr` (safe for the stdio MCP transport).
@@ -38,6 +38,8 @@ Built with TypeScript, the official `@modelcontextprotocol/sdk`, Axios, and Zod.
     get-transitions.ts               # bonus
     get-issue-comments.ts            # bonus
     get-issue-remote-links.ts        # bonus: linked Confluence pages / web links
+    get-issue-link-types.ts          # bonus: available inward/outward link types
+    create-issue-link.ts             # bonus: links two existing Jira issues
     execute-jql.ts                   # bonus
     create-story-from-requirements.ts# bonus: notes -> Jira backlog
     requirements-parser.ts           # heuristic notes parser used above
@@ -49,6 +51,8 @@ Built with TypeScript, the official `@modelcontextprotocol/sdk`, Axios, and Zod.
       get-page.ts
       get-page-by-title.ts
       get-page-comments.ts
+      create-page.ts
+      update-page.ts
       index.ts
 ```
 
@@ -109,6 +113,8 @@ If `JIRA_PAT` is set it takes precedence; otherwise both `JIRA_USERNAME` and `JI
 | `get_transitions` *(bonus)* | `GET /rest/api/2/issue/{key}/transitions` | Lists valid transitions for an issue |
 | `get_issue_comments` *(bonus)* | `GET /rest/api/2/issue/{key}/comment` | Lists all comments on an issue |
 | `get_issue_remote_links` *(bonus)* | `GET /rest/api/2/issue/{key}/remotelink` | Lists an issue's remote links, including linked Confluence pages |
+| `get_issue_link_types` *(bonus)* | `GET /rest/api/2/issueLinkType` | Lists valid issue link types and their inward/outward wording |
+| `create_issue_link` *(bonus)* | `POST /rest/api/2/issueLink` | Links two existing issues, with an optional comment |
 | `execute_jql` *(bonus)* | `GET /rest/api/2/search` | Arbitrary JQL with a configurable field set |
 | `create_jira_story_from_requirements` *(bonus)* | `POST /rest/api/2/issue` (looped) | Parses workshop notes / Fit-Gap text into Stories/Tasks/Bugs and bulk-creates them |
 
@@ -122,6 +128,10 @@ If `JIRA_PAT` is set it takes precedence; otherwise both `JIRA_USERNAME` and `JI
 | `confluence_get_page` | `GET /rest/api/content/{id}` | Full page by ID. `format: "storage"` (raw source, default) or `"view"` (server-rendered HTML with macros resolved) |
 | `confluence_get_page_by_title` | `GET /rest/api/content?spaceKey=&title=` | Finds a page by exact title within a space |
 | `confluence_get_page_comments` | `GET /rest/api/content/{id}/child/comment` | Lists comments on a page |
+| `confluence_create_page` | `POST /rest/api/content` | Creates a page from Confluence storage-format XHTML, optionally under a parent page |
+| `confluence_update_page` | `PUT /rest/api/content/{id}` | Replaces a page title and full storage-format XHTML body using a new version number |
+
+Confluence page bodies use storage-format XHTML, not Markdown. Before calling `confluence_update_page`, fetch the page with `confluence_get_page`, then pass `versionNumber` as the current `version.number + 1`; updates replace the complete body.
 
 ### Accessing Confluence pages linked from a Jira issue
 
@@ -188,9 +198,11 @@ Once connected in Copilot Agent mode:
 - *"Create a Task in project ABC titled 'Configure SSO for staging' with a short description."*
 - *"Add a comment to ABC-123 saying the fix has been deployed to staging."*
 - *"Show me the available transitions for ABC-123, then transition it to Done."*
+- *"List the Jira issue link types, then link ABC-123 as blocking ABC-456."*
 - *"List all projects I have access to."*
 - *"Run this JQL and show me just the priority and fixVersions fields: project = ABC AND status = 'In Progress'."*
 - *"Here are my Fit/Gap workshop notes: [paste notes]. Preview the Jira Stories/Tasks/Bugs you'd create in project ABC with dryRun, then create them for real."*
+- *"Fetch Confluence page 12345, then update it with this full storage-format XHTML body using the next version number."*
 
 ## Error Handling
 
