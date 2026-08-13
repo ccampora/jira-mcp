@@ -6,8 +6,12 @@ import { registerGetCurrentUserTool } from "./get-current-user.js";
 import { registerServerInfoTool } from "./server-info.js";
 import { registerSearchIssuesTool } from "./search-issues.js";
 import { registerGetIssueTool } from "./get-issue.js";
+import { registerGetIssuesBulkTool } from "./get-issues-bulk.js";
 import { registerCreateIssueTool } from "./create-issue.js";
+import { registerCreateIssuesBulkTool } from "./create-issues-bulk.js";
 import { registerAddCommentTool } from "./add-comment.js";
+import { registerAddIssueLabelsTool } from "./add-issue-labels.js";
+import { registerUpdateIssuesBulkTool } from "./update-issues-bulk.js";
 import { registerTransitionIssueTool } from "./transition-issue.js";
 import { registerGetProjectsTool } from "./get-projects.js";
 import { registerGetTransitionsTool } from "./get-transitions.js";
@@ -33,8 +37,12 @@ export function registerAllTools(
   registerServerInfoTool(server, client);
   registerSearchIssuesTool(server, client);
   registerGetIssueTool(server, client);
+  registerGetIssuesBulkTool(server, client);
   registerCreateIssueTool(server, client);
+  registerCreateIssuesBulkTool(server, client);
   registerAddCommentTool(server, client);
+  registerAddIssueLabelsTool(server, client);
+  registerUpdateIssuesBulkTool(server, client);
   registerTransitionIssueTool(server, client);
   registerGetProjectsTool(server, client);
 

@@ -7,7 +7,7 @@ Built with TypeScript, the official `@modelcontextprotocol/sdk`, Axios, and Zod.
 ## Features
 
 - 🔐 **Pluggable authentication**: Personal Access Token (preferred) or Basic auth (username/password), selected automatically from environment variables via an `AuthProvider` abstraction.
-- 🧰 **15 Jira MCP tools** covering issue search, retrieval, creation, comments, workflow transitions, project listing, issue linking, and remote links (linked Confluence pages).
+- 🧰 **19 Jira MCP tools** covering issue search, bulk retrieval, creation, combined updates, comments, labels, workflow transitions, project listing, issue linking, and remote links (linked Confluence pages).
 - 📚 **Optional Confluence Data Center / Server support**: when `CONFLUENCE_BASE_URL` is set, 8 additional tools for spaces, CQL search, page retrieval, comments, and page creation/update are registered. Confluence reuses the Jira credentials unless Confluence-specific ones are provided.
 - 🧠 **`create_jira_story_from_requirements`**: turns raw workshop notes / Fit-Gap analysis text into structured Jira Stories, Tasks, and Bugs — ideal for going straight from meeting notes to a Jira backlog.
 - ✅ Zod-validated tool inputs, typed Jira REST responses, and normalized error handling.
@@ -106,8 +106,12 @@ If `JIRA_PAT` is set it takes precedence; otherwise both `JIRA_USERNAME` and `JI
 | `server_info` | `GET /rest/api/2/serverInfo` | Jira version, deployment type, build number |
 | `search_issues` | `GET /rest/api/2/search` | Runs JQL, returns key/summary/status/assignee/reporter/created/updated |
 | `get_issue` | `GET /rest/api/2/issue/{key}` | Full issue details incl. comments, labels, assignee |
+| `get_issues_bulk` | `POST /rest/api/2/search` | Retrieves up to 1000 issue keys in one request with configurable fields |
 | `create_issue` | `POST /rest/api/2/issue` | Creates an issue, returns its key |
+| `create_issues_bulk` | `POST /rest/api/2/issue/bulk` | Creates issues in native Jira batches of up to 50 |
 | `add_comment` | `POST /rest/api/2/issue/{key}/comment` | Adds a comment |
+| `add_issue_labels` | `PUT /rest/api/2/issue/{key}` | Adds labels without removing existing labels |
+| `update_issues_bulk` | `PUT /rest/api/2/issue/{key}` (parallel) | Combines fields and label changes into one request per issue, with concurrency limited to 5 |
 | `transition_issue` | `POST /rest/api/2/issue/{key}/transitions` | Moves an issue through its workflow |
 | `get_projects` | `GET /rest/api/2/project` | Lists visible projects |
 | `get_transitions` *(bonus)* | `GET /rest/api/2/issue/{key}/transitions` | Lists valid transitions for an issue |
@@ -116,7 +120,9 @@ If `JIRA_PAT` is set it takes precedence; otherwise both `JIRA_USERNAME` and `JI
 | `get_issue_link_types` *(bonus)* | `GET /rest/api/2/issueLinkType` | Lists valid issue link types and their inward/outward wording |
 | `create_issue_link` *(bonus)* | `POST /rest/api/2/issueLink` | Links two existing issues, with an optional comment |
 | `execute_jql` *(bonus)* | `GET /rest/api/2/search` | Arbitrary JQL with a configurable field set |
-| `create_jira_story_from_requirements` *(bonus)* | `POST /rest/api/2/issue` (looped) | Parses workshop notes / Fit-Gap text into Stories/Tasks/Bugs and bulk-creates them |
+| `create_jira_story_from_requirements` *(bonus)* | `POST /rest/api/2/issue/bulk` | Parses workshop notes / Fit-Gap text and creates issues in batches of up to 50 |
+
+Jira Data Center REST v2 has native bulk creation and bulk search, but no public bulk-update endpoint. `update_issues_bulk` therefore reduces MCP round trips and combines multiple changes to each issue, while Jira still receives one `PUT` request per issue.
 
 ### Confluence Tools (enabled when `CONFLUENCE_BASE_URL` is set)
 

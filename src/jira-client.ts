@@ -55,6 +55,30 @@ export interface CreateIssueInput {
   issueType: string;
   summary: string;
   description?: string;
+  labels?: string[];
+}
+
+export interface UpdateIssueInput {
+  issueKey: string;
+  fields?: Record<string, unknown>;
+  labelsToAdd?: string[];
+  labelsToRemove?: string[];
+}
+
+export interface BulkOperationResult<T> {
+  index: number;
+  input: T;
+  issue?: JiraIssue;
+  error?: string;
+}
+
+interface BulkCreateIssuesResponse {
+  issues?: JiraIssue[];
+  errors?: Array<{
+    status?: number;
+    elementErrors?: JiraErrorResponse;
+    failedElementNumber?: number;
+  }>;
 }
 
 export interface SearchIssuesInput {
@@ -150,6 +174,28 @@ export class JiraClient {
     );
   }
 
+  async getIssuesBulk(issueKeys: string[], fields?: string[]): Promise<JiraSearchResult> {
+    const escapedKeys = issueKeys.map((key) => `"${key.replaceAll('"', '\\"')}"`);
+    return this.request(() =>
+      this.http.post<JiraSearchResult>("/search", {
+        jql: `key in (${escapedKeys.join(",")})`,
+        maxResults: issueKeys.length,
+        fields: fields ?? [
+          "summary",
+          "description",
+          "status",
+          "labels",
+          "assignee",
+          "reporter",
+          "created",
+          "updated",
+          "issuetype",
+          "project",
+        ],
+      }),
+    );
+  }
+
   async getIssue(issueKey: string): Promise<JiraIssue> {
     return this.request(() =>
       this.http.get<JiraIssue>(`/issue/${encodeURIComponent(issueKey)}`, {
@@ -168,9 +214,73 @@ export class JiraClient {
           issuetype: { name: input.issueType },
           summary: input.summary,
           ...(input.description ? { description: input.description } : {}),
+          ...(input.labels?.length ? { labels: input.labels } : {}),
         },
       }),
     );
+  }
+
+  async createIssuesBulk(
+    inputs: CreateIssueInput[],
+  ): Promise<Array<BulkOperationResult<CreateIssueInput>>> {
+    const results: Array<BulkOperationResult<CreateIssueInput>> = [];
+
+    for (let offset = 0; offset < inputs.length; offset += 50) {
+      const batch = inputs.slice(offset, offset + 50);
+      try {
+        const response = await this.request(() =>
+          this.http.post<BulkCreateIssuesResponse>("/issue/bulk", {
+            issueUpdates: batch.map((input) => ({
+              fields: {
+                project: { key: input.projectKey },
+                issuetype: { name: input.issueType },
+                summary: input.summary,
+                ...(input.description ? { description: input.description } : {}),
+                ...(input.labels?.length ? { labels: input.labels } : {}),
+              },
+            })),
+          }),
+        );
+
+        const failures = new Map(
+          (response.errors ?? []).map((error) => [error.failedElementNumber, error]),
+        );
+        let createdIndex = 0;
+        batch.forEach((input, batchIndex) => {
+          const failure = failures.get(batchIndex);
+          if (failure) {
+            const details = failure.elementErrors;
+            const messages = [
+              ...(details?.errorMessages ?? []),
+              ...Object.entries(details?.errors ?? {}).map(([field, message]) => `${field}: ${message}`),
+            ];
+            results.push({
+              index: offset + batchIndex,
+              input,
+              error: messages.join("; ") || `Jira returned status ${failure.status ?? "unknown"}`,
+            });
+          } else {
+            const issue = response.issues?.[createdIndex++];
+            results.push(
+              issue
+                ? { index: offset + batchIndex, input, issue }
+                : {
+                    index: offset + batchIndex,
+                    input,
+                    error: "Jira did not return a created issue or an error for this item",
+                  },
+            );
+          }
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        batch.forEach((input, batchIndex) => {
+          results.push({ index: offset + batchIndex, input, error: message });
+        });
+      }
+    }
+
+    return results.sort((left, right) => left.index - right.index);
   }
 
   async addComment(issueKey: string, comment: string): Promise<JiraComment> {
@@ -180,6 +290,59 @@ export class JiraClient {
         { body: comment },
       ),
     );
+  }
+
+  async addIssueLabels(issueKey: string, labels: string[]): Promise<void> {
+    await this.request(() =>
+      this.http.put<void>(`/issue/${encodeURIComponent(issueKey)}`, {
+        update: {
+          labels: labels.map((label) => ({ add: label })),
+        },
+      }),
+    );
+  }
+
+  async updateIssue(input: UpdateIssueInput): Promise<void> {
+    const labelUpdates = [
+      ...(input.labelsToAdd ?? []).map((label) => ({ add: label })),
+      ...(input.labelsToRemove ?? []).map((label) => ({ remove: label })),
+    ];
+    await this.request(() =>
+      this.http.put<void>(`/issue/${encodeURIComponent(input.issueKey)}`, {
+        ...(input.fields && Object.keys(input.fields).length > 0 ? { fields: input.fields } : {}),
+        ...(labelUpdates.length > 0 ? { update: { labels: labelUpdates } } : {}),
+      }),
+    );
+  }
+
+  async updateIssues(
+    inputs: UpdateIssueInput[],
+    concurrency = 5,
+  ): Promise<Array<BulkOperationResult<UpdateIssueInput>>> {
+    const results: Array<BulkOperationResult<UpdateIssueInput>> = new Array(inputs.length);
+    let nextIndex = 0;
+
+    const worker = async (): Promise<void> => {
+      while (nextIndex < inputs.length) {
+        const index = nextIndex++;
+        const input = inputs[index];
+        try {
+          await this.updateIssue(input);
+          results[index] = { index, input };
+        } catch (err) {
+          results[index] = {
+            index,
+            input,
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: Math.min(concurrency, inputs.length) }, () => worker()),
+    );
+    return results;
   }
 
   async getTransitions(issueKey: string): Promise<JiraTransitionsResult> {

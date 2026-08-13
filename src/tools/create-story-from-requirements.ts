@@ -74,36 +74,34 @@ export function registerCreateJiraStoryFromRequirementsTool(
           return jsonResult({ preview: backlogItems, totalParsed: backlogItems.length });
         }
 
-        const results = await Promise.allSettled(
-          backlogItems.map((item) =>
-            client.createIssue({
-              projectKey,
-              issueType: item.type,
-              summary: item.summary,
-              description: buildDescription(item),
-            }),
-          ),
+        const results = await client.createIssuesBulk(
+          backlogItems.map((item) => ({
+            projectKey,
+            issueType: item.type,
+            summary: item.summary,
+            description: buildDescription(item),
+          })),
         );
 
         const created: Array<{ type: string; summary: string; key: string }> = [];
         const failed: Array<{ type: string; summary: string; error: string }> = [];
 
-        results.forEach((result, idx) => {
-          const item = backlogItems[idx];
-          if (result.status === "fulfilled") {
-            created.push({ type: item.type, summary: item.summary, key: result.value.key });
+        results.forEach((result) => {
+          const item = backlogItems[result.index];
+          if (result.issue) {
+            created.push({ type: item.type, summary: item.summary, key: result.issue.key });
           } else {
-            const reason = result.reason;
             failed.push({
               type: item.type,
               summary: item.summary,
-              error: reason instanceof Error ? reason.message : String(reason),
+              error: result.error ?? "Jira did not return a created issue",
             });
           }
         });
 
         return jsonResult({
           totalRequested: backlogItems.length,
+          jiraRequestCount: Math.ceil(backlogItems.length / 50),
           createdCount: created.length,
           failedCount: failed.length,
           created,
