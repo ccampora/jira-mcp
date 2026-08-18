@@ -12,6 +12,7 @@ Built with TypeScript, the official `@modelcontextprotocol/sdk`, Axios, and Zod.
 - 🧠 **`create_jira_story_from_requirements`**: turns raw workshop notes / Fit-Gap analysis text into structured Jira Stories, Tasks, and Bugs — ideal for going straight from meeting notes to a Jira backlog.
 - ✅ Zod-validated tool inputs, typed Jira REST responses, and normalized error handling.
 - 📝 Leveled logging to `stderr` (safe for the stdio MCP transport).
+- 🌐 Optional Streamable HTTP transport for standalone container deployments.
 
 ## Project Structure
 
@@ -93,10 +94,42 @@ npm run dev
 | `CONFLUENCE_USERNAME`            | No                   | Username for Confluence Basic auth (requires `CONFLUENCE_PASSWORD`). Falls back to `JIRA_USERNAME`. |
 | `CONFLUENCE_PASSWORD`            | No                   | Password for Confluence Basic auth (requires `CONFLUENCE_USERNAME`). Falls back to `JIRA_PASSWORD`. |
 | `LOG_LEVEL`                      | No (default `info`)  | `debug` \| `info` \| `warn` \| `error`                          |
+| `MCP_TRANSPORT`                  | No (default `stdio`) | Set to `http` to expose the Streamable HTTP endpoint at `/mcp`  |
+| `PORT`                           | No (default `8787`)  | Listen port when `MCP_TRANSPORT=http`                            |
 
 If `JIRA_PAT` is set it takes precedence; otherwise both `JIRA_USERNAME` and `JIRA_PASSWORD` must be set. The server refuses to start if neither is configured.
 
 **Confluence** is optional: set `CONFLUENCE_BASE_URL` to register the Confluence tools. If you don't set Confluence-specific credentials, the Jira PAT (or username/password) is reused — handy when both apps share the same SSO / user directory.
+
+## HTTP Transport
+
+The default transport remains stdio, so `node dist/server.js` and existing MCP host configurations continue to work unchanged. To run as a standalone Streamable HTTP service, set:
+
+```bash
+MCP_TRANSPORT=http PORT=8787 node dist/server.js
+```
+
+The MCP endpoint is `http://localhost:8787/mcp`. Container health probes can use `GET http://localhost:8787/healthz`, which returns `200 {"status":"ok"}` without contacting Jira.
+
+For shared deployments, callers can override the Jira connection on every request with these headers:
+
+| Header | Description |
+| --- | --- |
+| `X-Jira-Base-Url` | Jira Data Center base URL; falls back to `JIRA_BASE_URL` |
+| `X-Jira-Pat` | Jira Personal Access Token; falls back to `JIRA_PAT` |
+
+Both headers must be sent on each MCP HTTP request when environment fallbacks are not configured. Treat `X-Jira-Pat` as a secret and terminate TLS before the container endpoint. HTTP mode can start without Jira environment credentials so health probes remain available; an MCP request without valid header or environment credentials receives a configuration error.
+
+Example initialization request:
+
+```bash
+curl http://localhost:8787/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "X-Jira-Base-Url: https://jira.company.com" \
+  -H "X-Jira-Pat: $JIRA_PAT" \
+  --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}'
+```
 
 ## MCP Tools
 
