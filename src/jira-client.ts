@@ -50,17 +50,32 @@ function extractJiraErrorMessage(error: AxiosError<JiraErrorResponse>): string {
   return error.message;
 }
 
+export interface CustomFieldOption {
+  fieldKey: string;
+  optionId: string;
+}
+
 export interface CreateIssueInput {
   projectKey: string;
   issueType: string;
   summary: string;
   description?: string;
   labels?: string[];
+  customFieldOptions?: CustomFieldOption[];
+}
+
+function customFieldOptionFields(
+  options?: CustomFieldOption[],
+): Record<string, { id: string }> {
+  return Object.fromEntries(
+    (options ?? []).map(({ fieldKey, optionId }) => [fieldKey, { id: optionId }]),
+  );
 }
 
 export interface UpdateIssueInput {
   issueKey: string;
   fields?: Record<string, unknown>;
+  customFieldOptions?: CustomFieldOption[];
   labelsToAdd?: string[];
   labelsToRemove?: string[];
 }
@@ -215,6 +230,7 @@ export class JiraClient {
           summary: input.summary,
           ...(input.description ? { description: input.description } : {}),
           ...(input.labels?.length ? { labels: input.labels } : {}),
+          ...customFieldOptionFields(input.customFieldOptions),
         },
       }),
     );
@@ -237,6 +253,7 @@ export class JiraClient {
                 summary: input.summary,
                 ...(input.description ? { description: input.description } : {}),
                 ...(input.labels?.length ? { labels: input.labels } : {}),
+                ...customFieldOptionFields(input.customFieldOptions),
               },
             })),
           }),
@@ -303,13 +320,17 @@ export class JiraClient {
   }
 
   async updateIssue(input: UpdateIssueInput): Promise<void> {
+    const fields = {
+      ...input.fields,
+      ...customFieldOptionFields(input.customFieldOptions),
+    };
     const labelUpdates = [
       ...(input.labelsToAdd ?? []).map((label) => ({ add: label })),
       ...(input.labelsToRemove ?? []).map((label) => ({ remove: label })),
     ];
     await this.request(() =>
       this.http.put<void>(`/issue/${encodeURIComponent(input.issueKey)}`, {
-        ...(input.fields && Object.keys(input.fields).length > 0 ? { fields: input.fields } : {}),
+        ...(Object.keys(fields).length > 0 ? { fields } : {}),
         ...(labelUpdates.length > 0 ? { update: { labels: labelUpdates } } : {}),
       }),
     );

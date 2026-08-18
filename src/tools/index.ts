@@ -11,6 +11,7 @@ import { registerCreateIssueTool } from "./create-issue.js";
 import { registerCreateIssuesBulkTool } from "./create-issues-bulk.js";
 import { registerAddCommentTool } from "./add-comment.js";
 import { registerAddIssueLabelsTool } from "./add-issue-labels.js";
+import { registerUpdateIssueTool } from "./update-issue.js";
 import { registerUpdateIssuesBulkTool } from "./update-issues-bulk.js";
 import { registerTransitionIssueTool } from "./transition-issue.js";
 import { registerGetProjectsTool } from "./get-projects.js";
@@ -42,6 +43,7 @@ export function registerAllTools(
   registerCreateIssuesBulkTool(server, client);
   registerAddCommentTool(server, client);
   registerAddIssueLabelsTool(server, client);
+  registerUpdateIssueTool(server, client);
   registerUpdateIssuesBulkTool(server, client);
   registerTransitionIssueTool(server, client);
   registerGetProjectsTool(server, client);

@@ -107,11 +107,12 @@ If `JIRA_PAT` is set it takes precedence; otherwise both `JIRA_USERNAME` and `JI
 | `search_issues` | `GET /rest/api/2/search` | Runs JQL, returns key/summary/status/assignee/reporter/created/updated |
 | `get_issue` | `GET /rest/api/2/issue/{key}` | Full issue details incl. comments, labels, assignee |
 | `get_issues_bulk` | `POST /rest/api/2/search` | Retrieves up to 1000 issue keys in one request with configurable fields |
-| `create_issue` | `POST /rest/api/2/issue` | Creates an issue, returns its key |
-| `create_issues_bulk` | `POST /rest/api/2/issue/bulk` | Creates issues in native Jira batches of up to 50 |
+| `create_issue` | `POST /rest/api/2/issue` | Creates an issue with optional labels and option-backed custom fields, then returns its key |
+| `create_issues_bulk` | `POST /rest/api/2/issue/bulk` | Creates issues with optional option-backed custom fields in native Jira batches of up to 50 |
 | `add_comment` | `POST /rest/api/2/issue/{key}/comment` | Adds a comment |
 | `add_issue_labels` | `PUT /rest/api/2/issue/{key}` | Adds labels without removing existing labels |
-| `update_issues_bulk` | `PUT /rest/api/2/issue/{key}` (parallel) | Combines fields and label changes into one request per issue, with concurrency limited to 5 |
+| `update_issue` | `PUT /rest/api/2/issue/{key}` | Updates fields, labels, and option-backed custom fields in one request |
+| `update_issues_bulk` | `PUT /rest/api/2/issue/{key}` (parallel) | Combines fields, labels, and option-backed custom fields into one request per issue, with concurrency limited to 5 |
 | `transition_issue` | `POST /rest/api/2/issue/{key}/transitions` | Moves an issue through its workflow |
 | `get_projects` | `GET /rest/api/2/project` | Lists visible projects |
 | `get_transitions` *(bonus)* | `GET /rest/api/2/issue/{key}/transitions` | Lists valid transitions for an issue |
@@ -123,6 +124,78 @@ If `JIRA_PAT` is set it takes precedence; otherwise both `JIRA_USERNAME` and `JI
 | `create_jira_story_from_requirements` *(bonus)* | `POST /rest/api/2/issue/bulk` | Parses workshop notes / Fit-Gap text and creates issues in batches of up to 50 |
 
 Jira Data Center REST v2 has native bulk creation and bulk search, but no public bulk-update endpoint. `update_issues_bulk` therefore reduces MCP round trips and combines multiple changes to each issue, while Jira still receives one `PUT` request per issue.
+
+### Option-backed custom fields
+
+The `create_issue`, `create_issues_bulk`, `update_issue`, and `update_issues_bulk` tools accept `customFieldOptions`. This lets callers provide deployment-specific Jira custom field keys and option IDs at call time instead of hardcoding them in the server. Each field key must use Jira's `customfield_<number>` format.
+
+For example, create a Test issue whose required `customfield_12402` option is `22300`:
+
+```json
+{
+  "projectKey": "NFS",
+  "issueType": "Test",
+  "summary": "Test summary",
+  "customFieldOptions": [
+    {
+      "fieldKey": "customfield_12402",
+      "optionId": "22300"
+    }
+  ]
+}
+```
+
+For bulk creation, include `customFieldOptions` on each issue that needs them:
+
+```json
+{
+  "issues": [
+    {
+      "projectKey": "NFS",
+      "issueType": "Test",
+      "summary": "First test",
+      "customFieldOptions": [
+        {
+          "fieldKey": "customfield_12402",
+          "optionId": "22300"
+        }
+      ]
+    }
+  ]
+}
+```
+
+The same structure can update an existing issue:
+
+```json
+{
+  "issueKey": "NFS-123",
+  "customFieldOptions": [
+    {
+      "fieldKey": "customfield_12402",
+      "optionId": "22300"
+    }
+  ]
+}
+```
+
+For `update_issues_bulk`, include that structure on each item in `updates`:
+
+```json
+{
+  "updates": [
+    {
+      "issueKey": "NFS-123",
+      "customFieldOptions": [
+        {
+          "fieldKey": "customfield_12402",
+          "optionId": "22300"
+        }
+      ]
+    }
+  ]
+}
+```
 
 ### Confluence Tools (enabled when `CONFLUENCE_BASE_URL` is set)
 

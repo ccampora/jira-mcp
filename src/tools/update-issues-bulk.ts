@@ -9,6 +9,18 @@ const updateIssueSchema = z.object({
     .record(z.unknown())
     .optional()
     .describe("Jira field values to set, e.g. summary, description, priority, or assignee"),
+  customFieldOptions: z
+    .array(
+      z.object({
+        fieldKey: z
+          .string()
+          .regex(/^customfield_\d+$/, "Must be a Jira custom field key, e.g. 'customfield_12402'"),
+        optionId: z.string().min(1).describe("Jira option ID, e.g. '22300'"),
+      }),
+    )
+    .min(1)
+    .optional()
+    .describe("Option-backed custom fields to set during the update"),
   labelsToAdd: z.array(z.string().trim().min(1)).optional(),
   labelsToRemove: z.array(z.string().trim().min(1)).optional(),
 });
@@ -19,7 +31,7 @@ export function registerUpdateIssuesBulkTool(server: McpServer, client: JiraClie
     {
       title: "Update Issues in Bulk",
       description:
-        "Updates many issues with bounded concurrency. Jira Data Center has no public bulk-update REST endpoint, so this sends one PUT per issue while combining all field and label changes for that issue into a single request.",
+        "Updates many issues with bounded concurrency. Supports option-backed custom fields through customFieldOptions; provide each Jira field key and option ID at call time. Jira Data Center has no public bulk-update REST endpoint, so this sends one PUT per issue while combining all changes for that issue into a single request.",
       inputSchema: {
         updates: z
           .array(updateIssueSchema)
@@ -47,8 +59,9 @@ export function registerUpdateIssuesBulkTool(server: McpServer, client: JiraClie
 
         for (const update of normalized) {
           const hasFields = update.fields && Object.keys(update.fields).length > 0;
+          const hasCustomFieldOptions = update.customFieldOptions?.length;
           const hasLabels = update.labelsToAdd?.length || update.labelsToRemove?.length;
-          if (!hasFields && !hasLabels) {
+          if (!hasFields && !hasCustomFieldOptions && !hasLabels) {
             return errorResult(`No field or label changes supplied for ${update.issueKey}`);
           }
           const overlap = update.labelsToAdd?.filter((label) =>
