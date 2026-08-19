@@ -1,10 +1,43 @@
 import { z } from "zod";
 
+const jiraPatsSchema = z.string().optional().transform((raw, ctx) => {
+  if (raw === undefined) return undefined;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "JIRA_PATS must be a valid JSON array of PAT strings.",
+    });
+    return z.NEVER;
+  }
+
+  if (!Array.isArray(parsed) || !parsed.every((value) => typeof value === "string")) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "JIRA_PATS must be a JSON array containing only strings.",
+    });
+    return z.NEVER;
+  }
+
+  const pats = parsed.map((value) => value.trim()).filter(Boolean);
+  if (pats.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "JIRA_PATS must contain at least one non-empty PAT.",
+    });
+    return z.NEVER;
+  }
+  return pats;
+});
+
 /**
  * Environment configuration schema.
  *
  * Jira authentication is either:
- *  - JIRA_PAT (Personal Access Token, preferred), or
+ *  - JIRA_PATS or JIRA_PAT (Personal Access Token, preferred), or
  *  - JIRA_USERNAME + JIRA_PASSWORD (Basic auth)
  *
  * Confluence (Data Center / Server) support is OPTIONAL and only enabled when
@@ -18,7 +51,8 @@ const envSchema = z
       .string()
       .min(1, "JIRA_BASE_URL is required")
       .url("JIRA_BASE_URL must be a valid URL, e.g. https://jira.company.com"),
-    JIRA_PAT: z.string().min(1).optional(),
+    JIRA_PATS: jiraPatsSchema,
+    JIRA_PAT: z.string().trim().min(1).optional(),
     JIRA_USERNAME: z.string().min(1).optional(),
     JIRA_PASSWORD: z.string().min(1).optional(),
     JIRA_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
@@ -39,14 +73,14 @@ const envSchema = z
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   })
   .superRefine((data, ctx) => {
-    const hasPat = !!data.JIRA_PAT;
+    const hasPat = !!data.JIRA_PATS?.length || !!data.JIRA_PAT;
     const hasBasic = !!data.JIRA_USERNAME && !!data.JIRA_PASSWORD;
 
     if (!hasPat && !hasBasic) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message:
-          "No authentication configured. Set JIRA_PAT, or both JIRA_USERNAME and JIRA_PASSWORD.",
+          "No authentication configured. Set JIRA_PATS, JIRA_PAT, or both JIRA_USERNAME and JIRA_PASSWORD.",
       });
     }
 

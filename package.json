@@ -12,6 +12,7 @@
     "start": "node dist/server.js",
     "dev": "tsx src/server.ts",
     "watch": "tsc -p tsconfig.json --watch",
+    "test": "tsx --test test/*.test.ts",
     "smoke-test": "node scripts/smoke-test.mjs"
   },
   "keywords": [

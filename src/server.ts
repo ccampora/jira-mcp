@@ -69,10 +69,12 @@ function headerValue(req: IncomingMessage, name: string): string | undefined {
 }
 
 function loadRequestConfig(req: IncomingMessage): AppConfig {
+  const requestPat = headerValue(req, "x-jira-pat");
   return loadConfig({
     ...process.env,
     JIRA_BASE_URL: headerValue(req, "x-jira-base-url") ?? process.env.JIRA_BASE_URL,
-    JIRA_PAT: headerValue(req, "x-jira-pat") ?? process.env.JIRA_PAT,
+    JIRA_PATS: requestPat ? undefined : process.env.JIRA_PATS,
+    JIRA_PAT: requestPat ?? process.env.JIRA_PAT,
   });
 }
 

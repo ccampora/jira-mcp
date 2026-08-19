@@ -6,9 +6,9 @@ Built with TypeScript, the official `@modelcontextprotocol/sdk`, Axios, and Zod.
 
 ## Features
 
-- 🔐 **Pluggable authentication**: Personal Access Token (preferred) or Basic auth (username/password), selected automatically from environment variables via an `AuthProvider` abstraction.
+- 🔐 **Pluggable authentication**: round-robin Personal Access Token rotation, a single PAT fallback, or Basic auth, selected automatically from environment variables via an `AuthProvider` abstraction.
 - 🧰 **19 Jira MCP tools** covering issue search, bulk retrieval, creation, combined updates, comments, labels, workflow transitions, project listing, issue linking, and remote links (linked Confluence pages).
-- 📚 **Optional Confluence Data Center / Server support**: when `CONFLUENCE_BASE_URL` is set, 8 additional tools for spaces, CQL search, page retrieval, comments, and page creation/update are registered. Confluence reuses the Jira credentials unless Confluence-specific ones are provided.
+- 📚 **Optional Confluence Data Center / Server support**: when `CONFLUENCE_BASE_URL` is set, 8 additional tools for spaces, CQL search, page retrieval, comments, and page creation/update are registered. Confluence uses its own credentials or falls back to the legacy single Jira credential; it never uses the rotating PAT pool.
 - 🧠 **`create_jira_story_from_requirements`**: turns raw workshop notes / Fit-Gap analysis text into structured Jira Stories, Tasks, and Bugs — ideal for going straight from meeting notes to a Jira backlog.
 - ✅ Zod-validated tool inputs, typed Jira REST responses, and normalized error handling.
 - 📝 Leveled logging to `stderr` (safe for the stdio MCP transport).
@@ -20,7 +20,7 @@ Built with TypeScript, the official `@modelcontextprotocol/sdk`, Axios, and Zod.
 /src
   server.ts                          # Entry point: wires config, auth, client, tools, and stdio transport
   jira-client.ts                     # Axios-based Jira REST API v2 client + error normalization
-  auth.ts                            # AuthProvider abstraction (PAT / Basic)
+  auth.ts                            # AuthProvider abstraction, PAT rotation, and cooldown state
   config.ts                          # Env var loading & validation (Zod)
   logger.ts                          # Leveled stderr logger
   types.ts                           # Jira REST API response shapes
@@ -61,7 +61,7 @@ Built with TypeScript, the official `@modelcontextprotocol/sdk`, Axios, and Zod.
 
 - Node.js >= 18
 - A Jira Data Center instance reachable from this machine, with either:
-  - a **Personal Access Token** (Jira DC 8.14+, `Profile > Personal Access Tokens`), or
+  - one or more **Personal Access Tokens** (Jira DC 8.14+, `Profile > Personal Access Tokens`), or
   - a valid **username + password**
 
 ## Setup
@@ -84,7 +84,8 @@ npm run dev
 | Variable                        | Required            | Description                                                   |
 | -------------------------------- | -------------------- | -------------------------------------------------------------- |
 | `JIRA_BASE_URL`                  | Yes                  | Base URL of your Jira Data Center instance, e.g. `https://jira.company.com` |
-| `JIRA_PAT`                       | One of PAT/Basic     | Personal Access Token (preferred auth method)                 |
+| `JIRA_PATS`                      | One of PAT/Basic     | JSON array of PAT strings. Requests use round-robin selection with independent 429 cooldowns. |
+| `JIRA_PAT`                       | One of PAT/Basic     | Single Personal Access Token used when `JIRA_PATS` is omitted. |
 | `JIRA_USERNAME`                  | One of PAT/Basic     | Username for Basic auth (requires `JIRA_PASSWORD`)             |
 | `JIRA_PASSWORD`                  | One of PAT/Basic     | Password for Basic auth (requires `JIRA_USERNAME`)              |
 | `JIRA_TIMEOUT_MS`                | No (default `15000`) | HTTP request timeout in milliseconds (shared with Confluence)  |
@@ -97,9 +98,11 @@ npm run dev
 | `MCP_TRANSPORT`                  | No (default `stdio`) | Set to `http` to expose the Streamable HTTP endpoint at `/mcp`  |
 | `PORT`                           | No (default `8787`)  | Listen port when `MCP_TRANSPORT=http`                            |
 
-If `JIRA_PAT` is set it takes precedence; otherwise both `JIRA_USERNAME` and `JIRA_PASSWORD` must be set. The server refuses to start if neither is configured.
+`JIRA_PATS` takes precedence over the backward-compatible `JIRA_PAT`; otherwise both `JIRA_USERNAME` and `JIRA_PASSWORD` must be set. `JIRA_PATS` must be a valid JSON array containing at least one non-empty string. The server refuses to start without valid authentication.
 
-**Confluence** is optional: set `CONFLUENCE_BASE_URL` to register the Confluence tools. If you don't set Confluence-specific credentials, the Jira PAT (or username/password) is reused — handy when both apps share the same SSO / user directory.
+When Jira responds with HTTP 429, only the PAT used for that request enters cooldown. The server honors `Retry-After`, immediately tries another available PAT, and waits for the earliest cooldown only when all PATs are cooling down. Rate-limit retries are bounded. Existing behavior for network and 5xx failures is unchanged.
+
+**Confluence** is optional: set `CONFLUENCE_BASE_URL` to register the Confluence tools. It does not use the rotating `JIRA_PATS` pool. Configure `CONFLUENCE_PAT` explicitly, or omit it to reuse only the legacy single `JIRA_PAT` (or Jira username/password).
 
 ## HTTP Transport
 
@@ -283,15 +286,27 @@ Add to your VS Code MCP configuration (e.g. `.vscode/mcp.json` in a workspace, o
       "args": ["${workspaceFolder}/dist/server.js"],
       "env": {
         "JIRA_BASE_URL": "https://jira.company.com",
-        "JIRA_PAT": "${input:jiraPat}"
+        "JIRA_PATS": "[\"${input:jiraPat1}\",\"${input:jiraPat2}\",\"${input:jiraPat3}\"]"
       }
     }
   },
   "inputs": [
     {
-      "id": "jiraPat",
+      "id": "jiraPat1",
       "type": "promptString",
-      "description": "Jira Personal Access Token",
+      "description": "Jira Personal Access Token 1",
+      "password": true
+    },
+    {
+      "id": "jiraPat2",
+      "type": "promptString",
+      "description": "Jira Personal Access Token 2",
+      "password": true
+    },
+    {
+      "id": "jiraPat3",
+      "type": "promptString",
+      "description": "Jira Personal Access Token 3",
       "password": true
     }
   ]
@@ -323,10 +338,11 @@ All Jira REST errors (4xx/5xx, network failures) are caught in `jira-client.ts`,
 ## Security Notes
 
 - Credentials are only ever read from environment variables — never hardcoded or logged.
+- If a PAT has been exposed, revoke it immediately and replace it with a newly generated PAT. Do not reuse the exposed value in `JIRA_PATS`.
 - Prefer a Personal Access Token over Basic auth; PATs can be scoped and revoked independently of your account password.
 - Set `JIRA_TLS_REJECT_UNAUTHORIZED=false` only as a last resort for internal CAs; prefer installing your corporate CA certificate via `NODE_EXTRA_CA_CERTS` instead.
-- This server only implements the **stdio** MCP transport (no HTTP listener), so it is not network-exposed by itself.
-- Run `npm audit` periodically — the MCP SDK's optional HTTP transport dependencies (`hono`, `ajv`/`fast-uri`) are not exercised by this server (stdio-only) but should still be kept current when upstream patches become available.
+- The optional HTTP transport listens on all interfaces by default. Put it behind TLS and appropriate network access controls; treat `X-Jira-Pat` as a secret.
+- Run `npm audit` periodically and keep the MCP SDK and HTTP transport dependencies current.
 
 ## License
 

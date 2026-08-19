@@ -1,6 +1,11 @@
-import axios, { AxiosInstance, AxiosError, isAxiosError } from "axios";
+import axios, {
+  AxiosInstance,
+  AxiosError,
+  isAxiosError,
+  type InternalAxiosRequestConfig,
+} from "axios";
 import https from "node:https";
-import type { AuthProvider } from "./auth.js";
+import type { AuthLease, AuthProvider } from "./auth.js";
 import type { AppConfig } from "./config.js";
 import { logger } from "./logger.js";
 import type {
@@ -15,6 +20,14 @@ import type {
   JiraRemoteLink,
   JiraErrorResponse,
 } from "./types.js";
+
+const AUTH_LEASE = Symbol("jiraAuthLease");
+const MAX_RATE_LIMIT_RETRIES = 5;
+const DEFAULT_RETRY_AFTER_MS = 1000;
+
+type AuthenticatedRequestConfig = InternalAxiosRequestConfig & {
+  [AUTH_LEASE]?: AuthLease;
+};
 
 /**
  * Error raised for any non-2xx response (or network failure) from the Jira
@@ -33,7 +46,41 @@ export class JiraApiError extends Error {
   }
 }
 
-function extractJiraErrorMessage(error: AxiosError<JiraErrorResponse>): string {
+function redactString(value: string, secrets: readonly string[]): string {
+  return secrets.reduce(
+    (redacted, secret) => secret ? redacted.replaceAll(secret, "[REDACTED]") : redacted,
+    value,
+  );
+}
+
+function redactValue<T>(value: T, secrets: readonly string[]): T {
+  if (typeof value === "string") return redactString(value, secrets) as T;
+  if (Array.isArray(value)) return value.map((item) => redactValue(item, secrets)) as T;
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, redactValue(item, secrets)]),
+    ) as T;
+  }
+  return value;
+}
+
+export function parseRetryAfter(value: unknown, now = Date.now()): number {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw !== "string" && typeof raw !== "number") {
+    return DEFAULT_RETRY_AFTER_MS;
+  }
+
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1000);
+
+  const timestamp = Date.parse(String(raw));
+  return Number.isNaN(timestamp) ? DEFAULT_RETRY_AFTER_MS : Math.max(0, timestamp - now);
+}
+
+function extractJiraErrorMessage(
+  error: AxiosError<JiraErrorResponse>,
+  secrets: readonly string[],
+): string {
   const data = error.response?.data;
   const parts: string[] = [];
   if (data?.errorMessages?.length) {
@@ -45,9 +92,9 @@ function extractJiraErrorMessage(error: AxiosError<JiraErrorResponse>): string {
     }
   }
   if (parts.length > 0) {
-    return parts.join("; ");
+    return redactString(parts.join("; "), secrets);
   }
-  return error.message;
+  return redactString(error.message, secrets);
 }
 
 export interface CustomFieldOption {
@@ -116,13 +163,14 @@ export interface LinkIssuesInput {
  */
 export class JiraClient {
   private readonly http: AxiosInstance;
+  private readonly sensitiveValues: readonly string[];
 
   constructor(config: AppConfig, authProvider: AuthProvider) {
+    this.sensitiveValues = authProvider.getSensitiveValues();
     this.http = axios.create({
       baseURL: `${config.JIRA_BASE_URL}/rest/api/2`,
       timeout: config.JIRA_TIMEOUT_MS,
       headers: {
-        Authorization: authProvider.getAuthHeader(),
         Accept: "application/json",
         "Content-Type": "application/json",
       },
@@ -134,31 +182,51 @@ export class JiraClient {
       validateStatus: (status) => status >= 200 && status < 300,
     });
 
-    this.http.interceptors.request.use((req) => {
+    this.http.interceptors.request.use(async (req) => {
+      const lease = await authProvider.acquireAuth();
+      req.headers.Authorization = lease.header;
+      (req as AuthenticatedRequestConfig)[AUTH_LEASE] = lease;
       logger.debug(`-> ${req.method?.toUpperCase()} ${req.url}`);
       return req;
     });
   }
 
   private async request<T>(fn: () => Promise<{ data: T }>): Promise<T> {
-    try {
-      const { data } = await fn();
-      return data;
-    } catch (err) {
-      if (isAxiosError(err)) {
-        const axiosErr = err as AxiosError<JiraErrorResponse>;
-        const message = extractJiraErrorMessage(axiosErr);
-        logger.error(`Jira API error: ${message}`, {
-          status: axiosErr.response?.status,
-          url: axiosErr.config?.url,
-        });
-        throw new JiraApiError(
-          message,
-          axiosErr.response?.status,
-          axiosErr.response?.data,
-        );
+    let rateLimitRetries = 0;
+    while (true) {
+      try {
+        const { data } = await fn();
+        return data;
+      } catch (err) {
+        if (isAxiosError(err)) {
+          const axiosErr = err as AxiosError<JiraErrorResponse>;
+          if (axiosErr.response?.status === 429 && rateLimitRetries < MAX_RATE_LIMIT_RETRIES) {
+            const retryAfterMs = parseRetryAfter(axiosErr.response.headers["retry-after"]);
+            (axiosErr.config as AuthenticatedRequestConfig | undefined)?.[AUTH_LEASE]
+              ?.markRateLimited(retryAfterMs);
+            rateLimitRetries++;
+            logger.warn("Jira rate limit reached; retrying with an available credential", {
+              status: 429,
+              url: axiosErr.config?.url,
+              retryAfterMs,
+              retry: rateLimitRetries,
+            });
+            continue;
+          }
+
+          const message = extractJiraErrorMessage(axiosErr, this.sensitiveValues);
+          logger.error(`Jira API error: ${message}`, {
+            status: axiosErr.response?.status,
+            url: axiosErr.config?.url,
+          });
+          throw new JiraApiError(
+            message,
+            axiosErr.response?.status,
+            redactValue(axiosErr.response?.data, this.sensitiveValues),
+          );
+        }
+        throw err;
       }
-      throw err;
     }
   }
 
