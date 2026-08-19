@@ -70,11 +70,14 @@ function headerValue(req: IncomingMessage, name: string): string | undefined {
 
 function loadRequestConfig(req: IncomingMessage): AppConfig {
   const requestPat = headerValue(req, "x-jira-pat");
+  const requestConfluencePat = headerValue(req, "x-confluence-pat");
   return loadConfig({
     ...process.env,
     JIRA_BASE_URL: headerValue(req, "x-jira-base-url") ?? process.env.JIRA_BASE_URL,
     JIRA_PATS: requestPat ? undefined : process.env.JIRA_PATS,
     JIRA_PAT: requestPat ?? process.env.JIRA_PAT,
+    CONFLUENCE_BASE_URL: headerValue(req, "x-confluence-base-url") ?? process.env.CONFLUENCE_BASE_URL,
+    CONFLUENCE_PAT: requestConfluencePat ?? process.env.CONFLUENCE_PAT,
   });
 }
 
