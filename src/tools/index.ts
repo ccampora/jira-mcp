@@ -19,6 +19,7 @@ import { registerGetTransitionsTool } from "./get-transitions.js";
 import { registerGetIssueCommentsTool } from "./get-issue-comments.js";
 import { registerGetIssueRemoteLinksTool } from "./get-issue-remote-links.js";
 import { registerGetIssueLinkTypesTool } from "./get-issue-link-types.js";
+import { registerGetIssueEditMetaTool } from "./get-issue-edit-meta.js";
 import { registerCreateIssueLinkTool } from "./create-issue-link.js";
 import { registerExecuteJqlTool } from "./execute-jql.js";
 import { registerCreateJiraStoryFromRequirementsTool } from "./create-story-from-requirements.js";
@@ -53,6 +54,7 @@ export function registerAllTools(
   registerGetIssueCommentsTool(server, client);
   registerGetIssueRemoteLinksTool(server, client);
   registerGetIssueLinkTypesTool(server, client);
+  registerGetIssueEditMetaTool(server, client);
   registerCreateIssueLinkTool(server, client);
   registerExecuteJqlTool(server, client);
   registerCreateJiraStoryFromRequirementsTool(server, client);

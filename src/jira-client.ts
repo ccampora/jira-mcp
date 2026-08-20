@@ -19,6 +19,7 @@ import type {
   JiraIssueLinkType,
   JiraRemoteLink,
   JiraErrorResponse,
+  JiraEditMetaResponse,
 } from "./types.js";
 
 const AUTH_LEASE = Symbol("jiraAuthLease");
@@ -484,6 +485,23 @@ export class JiraClient {
     return this.request(() =>
       this.http.get<JiraRemoteLink[]>(
         `/issue/${encodeURIComponent(issueKey)}/remotelink`,
+      ),
+    );
+  }
+
+  /**
+   * Fetches the edit metadata for an issue (GET /rest/api/2/issue/{key}/editmeta): every
+   * field editable on that issue, keyed by its Jira field id (e.g. "customfield_12402"),
+   * including each field's display name, schema/type (including Xray's custom field types
+   * such as its Manual Test Steps repository), and, for option-backed fields, the list of
+   * allowed values with their option ids. This is how an agent discovers the real
+   * customfield_NNNNN id and shape for a project- or issue-type-specific field (like an
+   * Xray "Test Steps" field) instead of guessing one.
+   */
+  async getIssueEditMeta(issueKey: string): Promise<JiraEditMetaResponse> {
+    return this.request(() =>
+      this.http.get<JiraEditMetaResponse>(
+        `/issue/${encodeURIComponent(issueKey)}/editmeta`,
       ),
     );
   }
