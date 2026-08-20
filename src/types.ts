@@ -120,3 +120,31 @@ export interface JiraRemoteLink {
     icon?: { url16x16?: string; title?: string };
   };
 }
+
+/**
+ * A single field's edit metadata, as returned by GET /rest/api/2/issue/{key}/editmeta,
+ * keyed by its Jira field id (e.g. "customfield_12402") in the parent map. Custom field
+ * apps (like Xray) expose their own `schema.custom` type strings here (e.g.
+ * "com.xpandit.plugins.xray:test-repository-manual-test-steps") so an agent can identify
+ * a project- or issue-type-specific field by name/type instead of guessing an id.
+ */
+export interface JiraEditMetaField {
+  required?: boolean;
+  name?: string;
+  schema?: {
+    type?: string;
+    custom?: string;
+    customId?: number;
+    items?: string;
+  };
+  operations?: string[];
+  allowedValues?: Array<{
+    id?: string;
+    value?: string;
+    name?: string;
+  }>;
+}
+
+export interface JiraEditMetaResponse {
+  fields: Record<string, JiraEditMetaField>;
+}
