@@ -27,6 +27,17 @@ inherited between products.
 Requires Node.js >= 18 and a Jira Cloud account with the permissions and token
 scopes required by the tools you use.
 
+### Run a release without cloning
+
+Download and extract `jira-mcp-1.0.2.zip` from the
+[v1.0.2 release](https://github.com/ccampora/jira-mcp/releases/tag/v1.0.2).
+The archive includes the compiled server and production dependencies. Configure
+`JIRA_BASE_URL`, `JIRA_CLOUD_EMAIL`, and `JIRA_CLOUD_API_TOKEN` through your
+host's approved secret mechanism, then run `node dist/server.js` from the
+extracted directory. The default transport is stdio. Never commit credentials.
+
+### Build from source
+
 ```powershell
 npm install
 Copy-Item .env.example .env

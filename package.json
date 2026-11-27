@@ -1,6 +1,6 @@
 {
   "name": "jira-cloud-mcp-server",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "MCP server for Jira and Confluence Cloud with email/API-token authentication",
   "type": "module",
   "main": "dist/server.js",

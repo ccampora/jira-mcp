@@ -39,7 +39,7 @@ function createMcpServer(
 ): McpServer {
   const server = new McpServer({
     name: "jira-cloud-mcp-server",
-    version: "1.0.1",
+    version: "1.0.2",
   });
 
   registerAllTools(server, jiraClient, confluenceClient);
