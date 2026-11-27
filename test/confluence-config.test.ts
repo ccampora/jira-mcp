@@ -57,14 +57,13 @@ test("Confluence requires safe HTTPS /wiki URLs and strict TLS", () => {
 test("HTTP Confluence overrides are independent and credential pairs are atomic", () => {
   const env = { ...jiraCloud, ...wikiCloud };
   const config = loadRequestConfig(request({
-    "x-confluence-base-url": "https://other.atlassian.net/wiki",
     "x-confluence-cloud-email": "other@example.com",
     "x-confluence-cloud-api-token": "placeholder-override",
   }), env);
   assert.equal(config.JIRA_CLOUD_API_TOKEN, jiraCloud.JIRA_CLOUD_API_TOKEN);
   assert.equal(config.CONFLUENCE_CLOUD_EMAIL, "other@example.com");
   assert.equal(config.CONFLUENCE_CLOUD_API_TOKEN, "placeholder-override");
-  assert.equal(config.CONFLUENCE_BASE_URL, "https://other.atlassian.net/wiki");
+  assert.equal(config.CONFLUENCE_BASE_URL, wikiCloud.CONFLUENCE_BASE_URL);
   for (const header of ["x-confluence-cloud-email", "x-confluence-cloud-api-token"]) {
     assert.throws(() => loadRequestConfig(request({ [header]: "placeholder" }), env),
       /supplied together/);

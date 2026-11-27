@@ -130,6 +130,7 @@ may be returned instead of display names.
 | `JIRA_TLS_REJECT_UNAUTHORIZED` | No | Must be `true`; default `true` |
 | `LOG_LEVEL` | No | `debug`, `info`, `warn`, or `error`; default `info` |
 | `MCP_TRANSPORT` | No | `stdio` (default) or `http` |
+| `MCP_HTTP_ACCESS_TOKEN` | HTTP only | Required separate high-entropy base64url token, at least 43 characters |
 | `PORT` | HTTP only | Listen port; default `8787` |
 
 ## HTTP Transport
@@ -140,6 +141,11 @@ $env:PORT = "8787"
 node dist\server.js
 ```
 
+Configure `MCP_HTTP_ACCESS_TOKEN` securely before starting HTTP mode. Generate a
+fresh random token using `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"`.
+Send it in `X-MCP-Access-Token` on every `/mcp` request; missing, incorrect, or
+duplicate headers return 401. The token grants access to the full server: store it
+outside source control, rotate it when exposed, and use TLS and network restrictions.
 The MCP endpoint is `http://localhost:8787/mcp`. `GET /healthz` returns
 `200 {"status":"ok"}` without contacting Jira.
 
@@ -149,18 +155,18 @@ Callers can override connections on every MCP request:
 | --- | --- |
 | `X-Atlassian-Credentials` | Jira `email,api-token` in a single secret header; requires server-side `JIRA_BASE_URL` |
 | `X-Confluence-Credentials` | Independent Confluence `email,api-token`; requires server-side `CONFLUENCE_BASE_URL` |
-| `X-Jira-Base-Url` | Jira site/API gateway URL |
 | `X-Jira-Cloud-Email` | Atlassian email; send with token header |
 | `X-Jira-Cloud-Api-Token` | API token; send with email header |
-| `X-Confluence-Base-Url` | Confluence URL including `/wiki` |
 | `X-Confluence-Cloud-Email` | Confluence email; send with token header |
 | `X-Confluence-Cloud-Api-Token` | Confluence token; send with email header |
 | `X-Jira-Deployment` / `X-Confluence-Deployment` | Optional; only `cloud` accepted |
 
-Missing overrides fall back to environment settings. Credential overrides must
+Jira and Confluence base URLs must be configured on the server. Requests containing
+`X-Jira-Base-Url` or `X-Confluence-Base-Url` are rejected, regardless of credential
+source. Missing credential overrides fall back to environment settings. Credential overrides must
 be supplied as complete email/token pairs, even when environment credentials
-exist. Without environment credentials, send the base URL and credential pair
-on every MCP request, including initialization and tool discovery.
+exist. Without environment credentials, send the credential pair on every MCP
+request, including initialization and tool discovery.
 
 Confluence tools must first be enabled with the environment
 `CONFLUENCE_BASE_URL`; a header alone does not register them. HTTP mode can
@@ -168,6 +174,12 @@ start without credentials for health probes; MCP requests still require valid
 configuration.
 
 ### Copilot Studio: single-header API key
+
+**Compatibility change:** the standard one-header Copilot Studio MCP wizard cannot
+supply both the required `X-MCP-Access-Token` and `X-Atlassian-Credentials`.
+Use an approved connector or gateway that securely supplies both headers, or
+configure a server-side Jira identity and use the wizard for the MCP token.
+Do not expose a server-side Jira identity to users who should not share it.
 
 Follow the [Copilot Studio setup and authorization guide](docs/COPILOT_STUDIO_SETUP.md)
 for step-by-step MCP onboarding, a manual custom connector definition,
@@ -180,13 +192,14 @@ Configure the MCP tool with:
 | Server URL | `https://<your-host>/mcp` |
 | Authentication | API key |
 | Type | Header |
-| Header name | `X-Atlassian-Credentials` |
-| Connection API-key value | `email@example.com,api-token` |
+| Header name | `X-MCP-Access-Token` |
+| Connection API-key value | The separate MCP server access token |
 
 Set `JIRA_BASE_URL` on the server (use the Atlassian gateway URL for scoped
-tokens). Jira email/token environment variables are not required when every
-request supplies this header. Use an Atlassian Cloud API token, not a Data
-Center PAT or account password.
+tokens). Jira email/token environment variables are not required only when
+every request also supplies separate Atlassian credential headers through a
+compatible connector. Use an Atlassian Cloud API token, not a Data Center PAT
+or account password.
 
 The value is split at the first comma; surrounding whitespace is trimmed.
 The server constructs Basic authentication for Atlassian in request memory.
@@ -197,8 +210,8 @@ Users must replace expired or revoked API tokens themselves.
 Combined credentials take precedence over that product's environment
 credentials. Malformed values, duplicate headers, and mixing combined and
 separate credentials for the same product fail explicitly without fallback.
-Base URL override headers for either product are rejected whenever a combined
-credential is supplied; use server-configured destinations.
+Base URL override headers for either product are always rejected; use
+server-configured destinations.
 
 `X-Atlassian-Credentials` applies to Jira only. Confluence credentials are
 never automatically inherited: use `X-Confluence-Credentials` separately, or
@@ -214,10 +227,9 @@ confirm which account is used.
 
 ### Copilot Studio and endpoint authentication
 
-The Streamable HTTP transport can be connected to Copilot Studio. However,
-**the server does not authenticate inbound MCP callers**: it does not validate
-an MCP API key or OAuth bearer token. Cloud credential headers configure
-outbound Atlassian access, not independent access control to MCP.
+The HTTP server requires the separate `X-MCP-Access-Token` on all MCP requests.
+Cloud credential headers configure outbound Atlassian access and are not an
+independent access control to MCP.
 
 For production, place it behind an authenticated HTTPS gateway, restrict
 upstream base URLs, and never log credential headers. Authenticate the
@@ -231,8 +243,8 @@ The single-header option above supplies both downstream values without OAuth.
 Configuring only `X-Jira-Cloud-Api-Token` still requires its separate email
 header. These credentials are validated by Atlassian on a tool's API call,
 not independently during MCP initialization or tool discovery. Use HTTPS,
-redact these headers at gateways/APM systems, and never put them in URLs or
-tool arguments. API-token mode does not add independent MCP access control.
+redact all credential headers at gateways/APM systems, and never put them in
+URLs or tool arguments. The MCP access token is independent of Jira credentials.
 
 ## Jira Tools
 

@@ -11,6 +11,7 @@ $parameters = @{
     PlanName = 'test-plan'
     AppName = 'test-mcp-app'
     JiraBaseUrl = 'https://example.atlassian.net'
+    McpAccessTokenKeyVaultReference = '@Microsoft.KeyVault(SecretUri=https://example.vault.azure.net/secrets/mcp-access-token/)'
 }
 $global:JiraDeployTest = @{
     Mode = 'new'
@@ -127,6 +128,7 @@ try {
         Assert ($deployment.Count -eq 1) 'deploys exactly once'
         $settings = @($global:JiraDeployTest.Calls | Where-Object { $_ -contains '--settings' })[0]
         Assert ($settings -contains 'MCP_TRANSPORT=http') 'uses HTTP transport'
+        Assert ($settings -contains "MCP_HTTP_ACCESS_TOKEN=$($parameters.McpAccessTokenKeyVaultReference)") 'configures the Key Vault reference'
         Assert (-not ($settings | Where-Object { $_ -match 'CLOUD_(EMAIL|API_TOKEN)=' })) 'never sets credentials'
     }
     Expect-Failure 'deploy-failure' 'Azure CLI command failed' -Update

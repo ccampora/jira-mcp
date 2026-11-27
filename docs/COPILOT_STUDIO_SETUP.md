@@ -1,8 +1,18 @@
 # Copilot Studio setup and authorization
 
-This guide connects Copilot Studio to this server over Streamable HTTP using
-**API key authentication with a combined Atlassian email/API-token header**.
-It does not use OAuth, Entra sign-in, a token broker, or Key Vault.
+**Compatibility warning:** HTTP now requires `X-MCP-Access-Token` on every
+request, in addition to the Atlassian credentials described below. The standard
+single-header MCP wizard cannot provide both. Use an approved connector or
+gateway capable of supplying both headers securely; the examples below for
+connection-owned Atlassian credentials are not sufficient on their own.
+Alternatively, configure a shared server-side Jira identity and use the wizard
+for `X-MCP-Access-Token`, understanding that all authorized callers share it.
+Do not expose a server-side Jira identity to unauthorized users.
+
+Generate a random 32-byte base64url MCP access token and configure
+`MCP_HTTP_ACCESS_TOKEN` using the host's secret mechanism. Send it as
+`X-MCP-Access-Token` on every MCP request. Require HTTPS, restrict network access,
+and redact both MCP and Atlassian credential headers.
 
 ## 1. Configure the server
 
@@ -31,7 +41,8 @@ file. Do not package your local dotenv file. This prevents missing connection
 credentials from falling back to a shared Jira account.
 
 The existing environment-variable and separate credential-header approaches
-remain supported for other deployments. No new runtime mode flag is needed.
+remain supported for other deployments. HTTP startup fails without a valid MCP
+access token.
 
 ## 2. Create the MCP connector in Copilot Studio
 
@@ -161,10 +172,10 @@ Atlassian authenticates the token owner and enforces Jira permissions
 - **Validation timing:** MCP initialization and tool discovery validate the
   credential's format and required configuration, not the credential against
   Atlassian. A successful connection or tool listing is not proof of Jira access.
-- **No independent MCP login:** The server does not issue its own access tokens
-  or validate a separate MCP API key. The header carries downstream credentials.
-  A well-formed but invalid token can reach discovery; real API calls fail
-  according to Atlassian's response. Do not describe discovery as authentication.
+- **Independent MCP access:** Every MCP request must carry the separate
+  `X-MCP-Access-Token`; the Atlassian header carries downstream credentials.
+  A well-formed but invalid Atlassian token can reach discovery; real API calls
+  fail according to Atlassian's response. Discovery does not verify Jira access.
 - **Expiry and revocation:** This is not OAuth. There is no automatic refresh.
   Replace the API-key value in the connection when its token expires or rotates.
   Revoke the API token in Atlassian when retiring it; deleting a Power Platform
@@ -175,10 +186,8 @@ credentials override the same product's environment credentials. Invalid values,
 repeated combined headers, and mixing combined and separate credential headers
 for the same product are rejected without fallback.
 
-Whenever either combined header is used, base URL override headers for both
-products are rejected. Destinations must be configured on the server. Existing
-separate-header clients still support their documented URL overrides, so this
-is not a global upstream URL allowlist.
+Base URL override headers for both products are rejected for all requests.
+Destinations must be configured on the server, including for separate-header clients.
 
 Use HTTPS end to end. Base64 is encoding, not encryption. Redact both credential
 headers and outbound Authorization headers from gateways, traces, and APM.

@@ -15,6 +15,9 @@ No subscription IDs, resource names, Atlassian emails, or API tokens are built i
 - Azure permissions to read the plan and create/configure/deploy Web Apps in
   the target resource group (for example, Contributor at that scope).
 - Network access to npm, Azure deployment endpoints, and Atlassian.
+- A Key Vault secret containing a randomly generated, at least 43-character
+  base64url MCP access token, and an App Service identity authorized to read it.
+  Configure this access before the deployed app is started.
 
 The plan incurs Azure charges. Deploying another app on an existing plan shares
 its compute capacity. Review capacity before adding workloads.
@@ -58,7 +61,8 @@ Use an unscoped Atlassian API token with your site's URL:
     -ResourceGroup '<existing-resource-group>' `
     -PlanName '<existing-linux-plan>' `
     -AppName '<globally-unique-app-name>' `
-    -JiraBaseUrl 'https://example.atlassian.net'
+    -JiraBaseUrl 'https://example.atlassian.net' `
+    -McpAccessTokenKeyVaultReference '@Microsoft.KeyVault(SecretUri=https://your-vault.vault.azure.net/secrets/mcp-access-token/)'
 ```
 
 For a scoped API token, use this instead:
@@ -118,6 +122,7 @@ Repeat the deployment command with **`-UpdateExisting`**:
     -PlanName '<existing-linux-plan>' `
     -AppName '<existing-mcp-app-name>' `
     -JiraBaseUrl 'https://example.atlassian.net' `
+    -McpAccessTokenKeyVaultReference '@Microsoft.KeyVault(SecretUri=https://your-vault.vault.azure.net/secrets/mcp-access-token/)' `
     -UpdateExisting
 ```
 
@@ -132,9 +137,16 @@ The script does not delete resources or modify your local PoC project.
 
 ## Credentials and Copilot Studio
 
-This deployment uses **connection-owned credentials**. Neither an email nor an
-API token is accepted as a deployment parameter. The script does not read or
-upload your local `.env`.
+The server requires a separate MCP access token. The script sets its Key Vault
+reference, not the token value, and does not read or upload your local `.env`.
+The app's managed identity must be authorized for that secret. A new app needs
+identity and Key Vault access configured before its first successful start;
+health verification can fail until then. Jira credentials are separate.
+
+**The standard single-header Copilot Studio wizard cannot send both the MCP
+access token and connection-owned Atlassian credentials.** Use an approved
+connector or gateway that provides both headers, or configure a shared Jira
+identity server-side and use the wizard solely for the MCP access token.
 
 Configure Copilot Studio using the printed HTTPS endpoint:
 
@@ -143,19 +155,19 @@ Configure Copilot Studio using the printed HTTPS endpoint:
 | Server URL | `https://<app-host>/mcp` (use the printed hostname) |
 | Authentication | API key |
 | Location | Header |
-| Header name | `X-Atlassian-Credentials` |
-| Connection value | `your-email@example.com,your-api-token` |
+| Header name | `X-MCP-Access-Token` |
+| Connection value | The separate MCP server access token |
 
 See [Copilot Studio setup and authorization](COPILOT_STUDIO_SETUP.md) for
 connection ownership, friendly labels, token expiry, and the optional Confluence
 configuration. This script configures Jira only; it does not enable Confluence.
 
-**Hosting is not authentication hardening.** The MCP endpoint has no independent
-login, OAuth implementation, or separately validated API key. Discovery checks
-configuration, not token validity; Jira validates credentials and permissions on
+**Hosting still requires defense in depth.** The MCP endpoint checks a separate
+shared access token, but has no per-user login or OAuth implementation. Discovery
+checks Jira configuration, not token validity; Jira validates credentials and permissions on
 actual API calls. Do not set shared server-side credentials unless you intentionally
-want callers to use that identity. Separate-header clients retain their documented
-URL overrides; combined credentials require server-configured destinations.
+want callers to use that identity. All clients require server-configured
+destinations; request-supplied base URL overrides are rejected.
 For broader exposure, assess network restrictions, abuse controls, and a suitable
 authentication boundary for your organization.
 

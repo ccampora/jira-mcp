@@ -9,6 +9,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 const serverEntry = path.resolve("src", "server.ts");
+const httpAccessToken = "test_access_token_012345678901234567890123456789012345";
 
 function serverEnv(overrides: Record<string, string>): Record<string, string> {
   const env: Record<string, string> = {};
@@ -58,6 +59,18 @@ test("stdio starts with default and explicit Cloud configurations", async () => 
   }
 });
 
+test("HTTP startup fails without an access token", async () => {
+  const child = spawn(process.execPath, ["--import", "tsx", serverEntry], {
+    env: serverEnv({ MCP_TRANSPORT: "http" }),
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+  const code = await new Promise<number | null>((resolve) => child.once("exit", resolve));
+  assert.notEqual(code, 0);
+  assert.match(stderr, /MCP_HTTP_ACCESS_TOKEN/);
+});
+
 test("HTTP health and MCP discovery work with request-scoped Cloud configurations", async () => {
   const portServer = createServer();
   await new Promise<void>((resolve) => portServer.listen(0, "127.0.0.1", resolve));
@@ -65,8 +78,9 @@ test("HTTP health and MCP discovery work with request-scoped Cloud configuration
   await new Promise<void>((resolve) => portServer.close(() => resolve()));
 
   const child = spawn(process.execPath, ["--import", "tsx", serverEntry], {
-    env: serverEnv({ MCP_TRANSPORT: "http", PORT: String(port),
+    env: serverEnv({ MCP_TRANSPORT: "http", PORT: String(port), MCP_HTTP_ACCESS_TOKEN: httpAccessToken,
       JIRA_BASE_URL: "https://example.atlassian.net",
+      JIRA_CLOUD_EMAIL: "shared@example.com", JIRA_CLOUD_API_TOKEN: "placeholder-shared-token",
       CONFLUENCE_BASE_URL: "https://example.atlassian.net/wiki",
       CONFLUENCE_CLOUD_EMAIL: "wiki@example.com", CONFLUENCE_CLOUD_API_TOKEN: "placeholder-wiki" }),
     stdio: ["ignore", "ignore", "pipe"],
@@ -92,20 +106,27 @@ test("HTTP health and MCP discovery work with request-scoped Cloud configuration
       await new Promise<void>((resolve) => setTimeout(resolve, 50));
     }
     assert.ok(responsive, `HTTP server did not become responsive: ${stderr}`);
+    for (const token of [undefined, "wrong-token"]) {
+      const response = await fetch(`${baseUrl}/mcp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { "X-MCP-Access-Token": token } : {}) },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      });
+      assert.equal(response.status, 401);
+    }
     for (const headers of [
       { "X-Atlassian-Credentials": "http@example.com,placeholder-http-cloud-token",
         "X-Confluence-Credentials": "wiki@example.com,placeholder-wiki" },
-      { "X-Jira-Base-Url": "https://example.atlassian.net",
-        "X-Jira-Cloud-Email": "http@example.com", "X-Jira-Cloud-Api-Token": "placeholder-http-cloud-token" },
-      { "X-Jira-Deployment": "cloud", "X-Jira-Base-Url": "https://example.atlassian.net",
+      { "X-Jira-Cloud-Email": "http@example.com", "X-Jira-Cloud-Api-Token": "placeholder-http-cloud-token" },
+      { "X-Jira-Deployment": "cloud",
         "X-Jira-Cloud-Email": "http@example.com", "X-Jira-Cloud-Api-Token": "placeholder-http-cloud-token",
-        "X-Confluence-Deployment": "cloud", "X-Confluence-Base-Url": "https://example.atlassian.net/wiki",
+        "X-Confluence-Deployment": "cloud",
         "X-Confluence-Cloud-Email": "wiki@example.com", "X-Confluence-Cloud-Api-Token": "placeholder-wiki" },
     ]) {
       const client = new Client({ name: "http-config-test", version: "1" });
       try {
         await client.connect(new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`), {
-          requestInit: { headers },
+          requestInit: { headers: { ...headers, "X-MCP-Access-Token": httpAccessToken } },
         }));
         const { tools } = await client.listTools();
         assert.ok(tools.some((tool) => tool.name === "create_issue"));
@@ -116,8 +137,8 @@ test("HTTP health and MCP discovery work with request-scoped Cloud configuration
     }
     const rejected = await fetch(`${baseUrl}/mcp`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Jira-Deployment": "cloud",
-        "X-Jira-Base-Url": "https://example.atlassian.net", "X-Jira-Pat": "invalid-cloud-secret" },
+      headers: { "Content-Type": "application/json", "X-MCP-Access-Token": httpAccessToken, "X-Jira-Deployment": "cloud",
+        "X-Jira-Pat": "invalid-cloud-secret" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
     assert.equal(rejected.status, 400);
@@ -126,12 +147,26 @@ test("HTTP health and MCP discovery work with request-scoped Cloud configuration
     assert.ok(!rejection.includes("invalid-cloud-secret"));
     const malformed = await fetch(`${baseUrl}/mcp`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Atlassian-Credentials": "invalid-combined-secret" },
+      headers: { "Content-Type": "application/json", "X-MCP-Access-Token": httpAccessToken, "X-Atlassian-Credentials": "invalid-combined-secret" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
     assert.equal(malformed.status, 400);
     assert.ok(!(await malformed.text()).includes("invalid-combined-secret"));
     assert.ok(!stderr.includes("invalid-combined-secret"));
+    for (const header of ["X-Jira-Base-Url", "X-Confluence-Base-Url"]) {
+      const response = await fetch(`${baseUrl}/mcp`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-MCP-Access-Token": httpAccessToken,
+          "X-Atlassian-Credentials": "http@example.com,placeholder-http-cloud-token",
+          [header]: "https://attacker.example",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      });
+      assert.equal(response.status, 400);
+      assert.match(await response.text(), /Base URL overrides are not allowed/);
+    }
   } finally {
     if (child.exitCode === null) child.kill();
     await exited;

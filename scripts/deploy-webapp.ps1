@@ -28,6 +28,10 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$JiraBaseUrl,
 
+    [Parameter(Mandatory, ParameterSetName = 'Deploy')]
+    [ValidatePattern('^@Microsoft\.KeyVault\(SecretUri=https://[a-zA-Z0-9-]+\.vault\.azure\.net/secrets/[a-zA-Z0-9-]+(/[a-fA-F0-9]+)?/?\)$')]
+    [string]$McpAccessTokenKeyVaultReference,
+
     [Parameter(ParameterSetName = 'Deploy')]
     [switch]$UpdateExisting,
 
@@ -149,6 +153,7 @@ try {
         'webapp', 'config', 'appsettings', 'set', '--subscription', $SubscriptionId,
         '--resource-group', $ResourceGroup, '--name', $AppName, '--settings',
         'MCP_TRANSPORT=http', "JIRA_BASE_URL=$($JiraBaseUrl.TrimEnd('/'))",
+        "MCP_HTTP_ACCESS_TOKEN=$McpAccessTokenKeyVaultReference",
         'JIRA_TLS_REJECT_UNAUTHORIZED=true', 'LOG_LEVEL=info',
         'SCM_DO_BUILD_DURING_DEPLOYMENT=false', '--output', 'none'
     )
@@ -167,7 +172,7 @@ try {
     if ($health.status -ne 'ok') { throw 'The deployed health endpoint did not return status=ok.' }
     Write-Output "Health verified: $healthUri"
     Write-Output "MCP endpoint: https://$($app.host)/mcp"
-    Write-Output 'Copilot Studio: API key, Header, X-Atlassian-Credentials, value=email,api-token'
+    Write-Output 'HTTP clients must supply X-MCP-Access-Token and Jira credentials separately.'
 } finally {
     if (Test-Path -LiteralPath $work) {
         Remove-Item -LiteralPath $work -Recurse -Force

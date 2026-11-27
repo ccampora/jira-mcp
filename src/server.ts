@@ -12,6 +12,7 @@ import { ConfluenceClient } from "./confluence-client.js";
 import { registerAllTools } from "./tools/index.js";
 import { logger } from "./logger.js";
 import { loadRequestConfig } from "./http-config.js";
+import { isHttpRequestAuthorized, loadHttpAccessToken } from "./http-auth.js";
 import {
   requestClients,
   requestScopedConfluenceClient,
@@ -38,7 +39,7 @@ function createMcpServer(
 ): McpServer {
   const server = new McpServer({
     name: "jira-cloud-mcp-server",
-    version: "1.0.0",
+    version: "1.0.1",
   });
 
   registerAllTools(server, jiraClient, confluenceClient);
@@ -70,6 +71,7 @@ function writeJson(res: ServerResponse, statusCode: number, body: unknown): void
 }
 
 async function startHttpServer(): Promise<void> {
+  const accessToken = loadHttpAccessToken();
   const port = Number(process.env.PORT ?? "8787");
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error(`PORT must be an integer between 1 and 65535 (received ${process.env.PORT})`);
@@ -113,6 +115,11 @@ async function startHttpServer(): Promise<void> {
     }
     if (path !== "/mcp") {
       writeJson(res, 404, { error: "Not found" });
+      return;
+    }
+
+    if (!isHttpRequestAuthorized(req, accessToken)) {
+      writeJson(res, 401, { error: "Unauthorized" });
       return;
     }
 

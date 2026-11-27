@@ -43,16 +43,14 @@ export function loadRequestConfig(
       throw new Error(`${name} is no longer supported; supply Cloud email/API-token headers.`);
     }
   }
+  for (const product of ["jira", "confluence"]) {
+    if (headerValue(req, `x-${product}-base-url`) !== undefined) {
+      throw new Error("Base URL overrides are not allowed; configure server-side URLs.");
+    }
+  }
   const overrides: NodeJS.ProcessEnv = {};
   const jiraCredentials = combinedCredentials(req, "x-atlassian-credentials");
   const confluenceCredentials = combinedCredentials(req, "x-confluence-credentials");
-  if (jiraCredentials || confluenceCredentials) {
-    for (const product of ["jira", "confluence"]) {
-      if (headerValue(req, `x-${product}-base-url`) !== undefined) {
-        throw new Error("Base URL overrides are not allowed with combined credentials; configure server-side URLs.");
-      }
-    }
-  }
   for (const product of ["jira", "confluence"]) {
     const credentials = product === "jira" ? jiraCredentials : confluenceCredentials;
     const email = headerValue(req, `x-${product}-cloud-email`);
@@ -66,7 +64,7 @@ export function loadRequestConfig(
     if ((email !== undefined) !== (token !== undefined)) {
       throw new Error(`X-${product}-Cloud-Email and X-${product}-Cloud-Api-Token must be supplied together`);
     }
-    for (const suffix of ["deployment", "base-url", "cloud-email", "cloud-api-token"]) {
+    for (const suffix of ["deployment", "cloud-email", "cloud-api-token"]) {
       const value = headerValue(req, `x-${product}-${suffix}`);
       if (value !== undefined) {
         overrides[`${product}-${suffix}`.replaceAll("-", "_").toUpperCase()] = value;

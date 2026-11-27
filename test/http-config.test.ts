@@ -25,22 +25,34 @@ test("HTTP accepts paired per-request credentials without changing other request
   const config = loadRequestConfig(request({
     "x-jira-cloud-email": "override@example.com",
     "x-jira-cloud-api-token": "override-cloud-token",
-    "x-jira-base-url": "https://api.atlassian.com/ex/jira/site-id/",
   }), cloudEnv);
   assert.equal(config.JIRA_CLOUD_EMAIL, "override@example.com");
   assert.equal(config.JIRA_CLOUD_API_TOKEN, "override-cloud-token");
-  assert.equal(config.JIRA_BASE_URL, "https://api.atlassian.com/ex/jira/site-id");
+  assert.equal(config.JIRA_BASE_URL, cloudEnv.JIRA_BASE_URL);
   assert.equal(loadRequestConfig(request({}), cloudEnv).JIRA_CLOUD_API_TOKEN,
     cloudEnv.JIRA_CLOUD_API_TOKEN);
 });
 
 test("HTTP can use only request credentials without environment credentials", () => {
   const config = loadRequestConfig(request({
-    "x-jira-base-url": cloudEnv.JIRA_BASE_URL,
     "x-jira-cloud-email": cloudEnv.JIRA_CLOUD_EMAIL,
     "x-jira-cloud-api-token": cloudEnv.JIRA_CLOUD_API_TOKEN,
-  }), {});
+  }), { JIRA_BASE_URL: cloudEnv.JIRA_BASE_URL });
   assert.equal(config.JIRA_DEPLOYMENT, "cloud");
+});
+
+test("HTTP rejects all request-selected destinations before using any credentials", () => {
+  for (const header of ["x-jira-base-url", "x-confluence-base-url"]) {
+    for (const credentials of [
+      {},
+      { "x-jira-cloud-email": "override@example.com", "x-jira-cloud-api-token": "override-token" },
+      { "x-atlassian-credentials": "override@example.com,override-token" },
+    ]) {
+      assert.throws(() => loadRequestConfig(request({
+        ...credentials, [header]: "https://attacker.example",
+      }), cloudEnv), /Base URL overrides are not allowed/);
+    }
+  }
 });
 
 test("HTTP rejects partial pairs, legacy PAT headers, and non-Cloud deployments", () => {
